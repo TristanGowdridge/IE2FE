@@ -1,0 +1,116 @@
+{
+    "steel": {
+        "youngsModulus": 200e9,
+        "poissonsRatio": 0.30,
+        "density": 7850,
+        "linearThermalExpansionCoefficient": 12e-6
+    },
+    "iron": {
+        "youngsModulus": 114e9,
+        "poissonsRatio": 0.25,
+        "density": 7200,
+        "linearThermalExpansionCoefficient": 10.2e-6
+    },
+    "aluminiumAlloy": {
+        "youngsModulus": 70e9,
+        "poissonsRatio": 0.33,
+        "density": 2800,
+        "linearThermalExpansionCoefficient": 22e-6
+    },
+    "nickelAlloy": {
+        "youngsModulus": 207e9,
+        "poissonsRatio": 0.31,
+        "density": 8900,
+        "linearThermalExpansionCoefficient": 13e-6
+    },
+    "copperAlloy": {
+        "youngsModulus": 110e9,
+        "poissonsRatio": 0.34,
+        "density": 8900,
+        "linearThermalExpansionCoefficient": 16.6e-6
+    },
+    "titaniumAlloy": {
+        "youngsModulus": 116e9,
+        "poissonsRatio": 0.34,
+        "density": 4500,
+        "linearThermalExpansionCoefficient": 8.6e-6
+    },
+    "glass": {
+        "youngsModulus": 70e9,
+        "poissonsRatio": 0.2,
+        "density": 2500,
+        "linearThermalExpansionCoefficient": 9e-6
+    },
+    "clayProduct": {
+        "youngsModulus": 15e9,
+        "poissonsRatio": 0.25,
+        "density": 1800,
+        "linearThermalExpansionCoefficient": 5e-6
+    },
+    "refractory": {
+        "youngsModulus": 200e9,
+        "poissonsRatio": 0.28,
+        "density": 3000,
+        "linearThermalExpansionCoefficient": 6e-6
+    },
+    "abrasive": {
+        "youngsModulus": 400e9,
+        "poissonsRatio": 0.21,
+        "density": 3200,
+        "linearThermalExpansionCoefficient": 5e-6
+    },
+    "cement": {
+        "youngsModulus": 20e9,
+        "poissonsRatio": 0.20,
+        "density": 2400,
+        "linearThermalExpansionCoefficient": 12e-6
+    },
+    "advancedCeramic": {
+        "youngsModulus": 380e9,
+        "poissonsRatio": 0.24,
+        "density": 3200,
+        "linearThermalExpansionCoefficient": 8e-6
+    },
+    "thermoplastic": {
+        "youngsModulus": 2.5e9,
+        "poissonsRatio": 0.35,
+        "density": 950,
+        "linearThermalExpansionCoefficient": 100e-6
+    },
+    "thermoset": {
+        "youngsModulus": 3e9,
+        "poissonsRatio": 0.38,
+        "density": 1200,
+        "linearThermalExpansionCoefficient": 50e-6
+    },
+    "elastomer": {
+        "youngsModulus": 0.01e9,
+        "poissonsRatio": 0.48,
+        "density": 1100,
+        "linearThermalExpansionCoefficient": 150e-6
+    },
+    "particle-reinforced": {
+        "youngsModulus": 70e9,
+        "poissonsRatio": 0.28,
+        "density": 2000,
+        "linearThermalExpansionCoefficient": 15e-6
+    },
+    "fibre-reinforced": {
+        "youngsModulus": 100e9,
+        "poissonsRatio": 0.30,
+        "density": 1800,
+        "linearThermalExpansionCoefficient": 8e-6
+    },
+    "structural": {
+        "youngsModulus": 250e9,
+        "poissonsRatio": 0.29,
+        "density": 7850,
+        "linearThermalExpansionCoefficient": 12e-6
+    },
+    "concrete": {
+        "youngsModulus": 35e9,
+        "poissonsRatio": 0.2,
+        "density": 2400,
+        "linearThermalExpansionCoefficient": 1e-5
+    }
+}

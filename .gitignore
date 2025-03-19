@@ -1,0 +1,14 @@
+__pycache__/
+env/
+LUSASFiles32/
+*.exe
+*.txt
+*.mdl
+*.jpg
+*.jpeg
+*.lvb
+database.json
+Papers/
+fe_models/
+ie_models/
+loadcase_vba_scripts/
