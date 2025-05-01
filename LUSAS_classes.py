@@ -139,6 +139,10 @@ class LUSASSession(ABC):
         # consuming LUSAS API calls.
         self.coords_name_map = {}
         
+        # Used as a flag to run the the simulation if a relevant loading script
+        # is found.
+        self.loading_script_found = False
+        
         ie_path = join(os.getcwd(), LUSASSession.IE_FOLDER, filename)
         if not exists(ie_path):
             raise FileNotFoundError(f"The file {ie_path} does not exist.")
@@ -540,6 +544,10 @@ class LUSASSession(ABC):
         """
         filename = self.bridge_identifier
         
+        if not self.loading_script_found:
+            print(f"Cannot save results for {filename} as no loading script was found.")
+            return
+        
         # Save displacement data
         attr = self.database.createPrintResultsWizard("PRW Displacement")
         attr.setUnits(None)
@@ -646,10 +654,9 @@ class LUSASSession(ABC):
                 continue
             if match.group() == self.bridge_identifier:
                 self.modeller.fileOpen(join(loadcase_path, filename))
+                self.loading_script_found = True
                 break
-        else:
-            raise NameError("Cannot find loading lvb script")
-                
+         
     def save_model(self):
         """
         Save the model in the FE_FOLDER.
@@ -799,8 +806,15 @@ class LadderDeck(LUSASSession):
 
 
 class LatticeTower(LUSASSession):
-    def __init__(self):
-        raise NotImplementedError("Lattice Tower not implemented.")
+    def __init__(self, filename):
+        super(LatticeTower, self).__init__(filename)
+
+    def subclass_specific_logic(self):
+        """
+        There is no additional specific logic for the beam and slab bridge, but
+        need to overwrite the abstract method in the inherited class.
+        """
+        pass
 
 
 class Monopole(LUSASSession):
