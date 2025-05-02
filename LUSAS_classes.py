@@ -648,6 +648,9 @@ class LUSASSession(ABC):
         from the bridge_identifier.
         """
         loadcase_path = join(os.getcwd(), LUSASSession.LOADCASE_FOLDER)
+        if not exists(loadcase_path):
+            return
+        
         for filename in os.listdir(loadcase_path):
             match = re.search(r"(\d+)-(\d+)-(\d+)", filename)
             if not match:
