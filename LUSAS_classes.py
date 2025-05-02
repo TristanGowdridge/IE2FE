@@ -547,18 +547,21 @@ class LUSASSession(ABC):
         if not self.loading_script_found:
             print(f"Cannot save results for {filename} as no loading script was found.")
             return
+
+        self.save_displacement_data(filename)
+        self.save_reaction_data(filename)
+     
+    def common_save_params(self, attr):
+        """
         
-        # Save displacement data
-        attr = self.database.createPrintResultsWizard("PRW Displacement")
+        """
         attr.setUnits(None)
         attr.setResultsType("Components")
         attr.setResultsOrder("Mesh")
         attr.setResultsContent("Tabular and Summary")
-        attr.setResultsEntity("Displacement")
         attr.setExtent("Elements showing results", "")
         attr.setResultsLocation("Nodal")
         attr.setLoadcasesOption("All")
-        attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
         primaryComponents = ["All"]
         primaryEntities = ["Displacement"]
         attr.setPrimaryResultsData(primaryComponents, primaryEntities)
@@ -574,6 +577,15 @@ class LUSASSession(ABC):
         attr.setThreshold(None)
         attr.showResults(False)
         
+    def save_displacement_data(self, filename):
+        """
+        
+        """
+        attr = self.database.createPrintResultsWizard("PRW Displacement")
+        attr.setResultsEntity("Displacement")
+        attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
+        self.common_save_params(attr)
+
         displacement_folder = join(
             os.getcwd(), LUSASSession.FE_FOLDER, "displacement_results"
         )
@@ -584,31 +596,16 @@ class LUSASSession(ABC):
             join(displacement_folder, f"{filename}.txt"), "Text"
         )
         
-        # Save reaction data
+        self.modeller.getGridWindowByID(1).close()
+    
+    def save_reaction_data(self, filename):
+        """
+        
+        """
         attr = self.database.createPrintResultsWizard("PRW Reaction")
-        attr.setUnits(None)
-        attr.setResultsType("Components")
-        attr.setResultsOrder("Mesh")
-        attr.setResultsContent("Tabular and Summary")
         attr.setResultsEntity("Reaction")
-        attr.setExtent("Elements showing results", "")
-        attr.setResultsLocation("Nodal")
-        attr.setLoadcasesOption("All")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
-        primaryComponents = ["All"]
-        primaryEntities = ["Displacement"]
-        attr.setPrimaryResultsData(primaryComponents, primaryEntities)
-        attr.setAnalysisResultTypes(None)
-        attr.setResultsTransformNone()
-        attr.showCoordinates(True)
-        attr.showExtremeResults(False)
-        attr.setSlice(False)
-        attr.setAllowDerived(False)
-        attr.setDisplayNow(True)
-        attr.showActiveNodesOnly(True)
-        attr.setSigFig(6, False)
-        attr.setThreshold(None)
-        attr.showResults(False)
+        self.common_save_params(attr)
         
         reaction_folder = join(
             os.getcwd(), LUSASSession.FE_FOLDER, "reaction_results"
@@ -616,9 +613,11 @@ class LUSASSession(ABC):
         if not exists(reaction_folder):
             os.mkdir(reaction_folder)
         
-        self.modeller.getGridWindowByID(2).saveAllAs(
+        self.modeller.getGridWindowByID(1).saveAllAs(
             join(reaction_folder, f"{filename}.txt"), "Text"
         )
+        
+        self.modeller.getGridWindowByID(1).close()
         
     def assign_gravity(self):
         """
