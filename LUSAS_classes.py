@@ -84,6 +84,20 @@ def allocate_subclass(filename):
     return subclass_class(filename)
 
 
+def is_clockwise_about(p1, p2, centre):
+    """
+    Calculate the cross product of vectors about some centre. Returns true if
+    the line going from p1 to p2 points clockwise around centre.
+    """
+    x1, y1, _ = p1
+    x2, y2, _ = p2
+    cx, cy, _ = centre
+
+    cross = (x2 - x1) * (y1 - cy) - (y2 - y1) * (x1 - cx)
+    
+    return cross < 0
+
+
 class LUSASSession(ABC):
     VERSION = "21.1"
     FE_FOLDER = "fe_models"  # Directory where the FE models will be saved.
@@ -813,16 +827,36 @@ class LatticeTower(LUSASSession):
 
     def subclass_specific_logic(self):
         """
-        Need to orient all the lines to point upwards.
+        Need to:
+            1) Orient all the lines to point upwards.
+            2) For the horizontal bracing, we need to make the line go
+                clockwise (in plan view)
+            3) Create 4 local coordinate items for each leg rotation
+            4)
+    
         """
+        # Used to determine the centre of the structure, upon which the
+        # rotation of the horizontal elements is tested against.
+        x_min, y_min = float("inf"), float("inf")
+        x_max, y_max = float("-inf"), float("-inf")
+        for element in self.ie_table.values():
+            for coord in element.coords:
+                x_max, y_max = max(x_max, coord[0]), max(y_max, coord[1])
+                x_min, y_min = min(x_min, coord[0]), min(y_min, coord[1])
+        centre = ((x_max-x_min)/2, (y_max-y_min)/2, 0)
+        
         lines_to_be_reversed = []
         for line in self.selection.add("Line", "All").getObjects("Line", "All"):
             start_point = line.getStartPoint()
             end_point = line.getEndPoint()
             p1, p2 = start_point.getXYZ(), end_point.getXYZ()
-            if p2[2] - p1[2] < 0:
+            if p2[2] - p1[2] < 0:  # 1) Orient Lines Upwards
                 lines_to_be_reversed.append(line.getID())
-                
+            
+            elif abs(p2[2] - p1[2]) < 1e-6:  # 2) Make horizontal clockwise
+                if is_clockwise_about(p1, p2, centre):
+                    lines_to_be_reversed.append(line.getID())
+        
         # Perform reversal
         self.geom.setAllDefaults()
         self.geom.cycleReverse(True)
@@ -832,7 +866,6 @@ class LatticeTower(LUSASSession):
         self.selection.add("Line", lines_to_be_reversed)
         self.selection.reverse(self.geom)
         self.selection.remove("All")
-        
 
 
 class Monopole(LUSASSession):
