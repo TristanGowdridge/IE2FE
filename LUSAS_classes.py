@@ -813,10 +813,26 @@ class LatticeTower(LUSASSession):
 
     def subclass_specific_logic(self):
         """
-        There is no additional specific logic for the beam and slab bridge, but
-        need to overwrite the abstract method in the inherited class.
+        Need to orient all the lines to point upwards.
         """
-        pass
+        lines_to_be_reversed = []
+        for line in self.selection.add("Line", "All").getObjects("Line", "All"):
+            start_point = line.getStartPoint()
+            end_point = line.getEndPoint()
+            p1, p2 = start_point.getXYZ(), end_point.getXYZ()
+            if p2[2] - p1[2] < 0:
+                lines_to_be_reversed.append(line.getID())
+                
+        # Perform reversal
+        self.geom.setAllDefaults()
+        self.geom.cycleReverse(True)
+        self.geom.cycleReset(False)
+        self.selection.remove("All")
+        
+        self.selection.add("Line", lines_to_be_reversed)
+        self.selection.reverse(self.geom)
+        self.selection.remove("All")
+        
 
 
 class Monopole(LUSASSession):
