@@ -882,9 +882,12 @@ class LatticeTower(LUSASSession):
         
         origin = (0, 0, 0)
         for i in range(1, 5):
+            lines_to_rotate = []
             rotat = rotation_map[i]
+            for leg_name in legs[str(i)]:
+                lines_to_rotate.append(self.ie_table[leg_name].lusas_identifier[1])
             attr = self.database.createLocalCartesianXYAttr(f"Rotation_{rotat}", rotat, origin).setAxesType("Cartesian")
-            self.selection.add("Line", legs[i])
+            self.selection.add("Line", lines_to_rotate)
             self.assignment.setAllDefaults()
             self.assignment.setLoadset("Loadcase 1")
             self.database.getAttribute("Local Coordinates", f"Rotation_{rotat}").assignTo(self.selection, self.assignment)
