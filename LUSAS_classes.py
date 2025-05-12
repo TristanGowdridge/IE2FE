@@ -909,6 +909,38 @@ class LatticeTower(LUSASSession):
             self.assignment.setLoadset("Loadcase 1")
             self.database.getAttribute("Local Coordinates", f"Rotation_{rotat}").assignTo(self.selection, self.assignment)
             self.selection.remove("All")
+    
+        # Rotating each leg so corner faces outwards
+        rotation_map = {
+            1: 180,
+            2: 90,
+            3: 0,
+            4: 270
+        }
+        
+        legs = defaultdict(list)
+        for key in self.ie_table:
+            if key.startswith("leg-"):
+                parts = key.split("-")
+                if len(parts) == 3:
+                    legs[parts[2]].append(key)
+        
+        origin = (0, 0, 0)
+        for i in range(1, 5):
+            lines_to_rotate = []
+            rotat = rotation_map[i]
+            for leg_name in legs[str(i)]:
+                lines_to_rotate.append(self.ie_table[leg_name].lusas_identifier[1])
+            attr = self.database.createLocalCartesianXYAttr(f"Rotation_{rotat}", rotat, origin).setAxesType("Cartesian")
+            self.selection.add("Line", lines_to_rotate)
+            self.assignment.setAllDefaults()
+            self.assignment.setLoadset("Loadcase 1")
+            self.database.getAttribute("Local Coordinates", f"Rotation_{rotat}").assignTo(self.selection, self.assignment)
+            self.selection.remove("All")
+        
+        # Setting the cross-section centroid as L2 (the corner of the L)
+        for line_geom in self.database.getAttributes("Line Geometric"):
+            line_geom.setEccentricityOrigin("Fibre", "Fibre", "L2", "L2")
 
 
 class Monopole(LUSASSession):
