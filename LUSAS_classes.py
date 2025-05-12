@@ -22,6 +22,7 @@ from os.path import exists, join
 import ast
 from collections import defaultdict
 from abc import ABC, abstractmethod
+import json
 
 from win32com.client.dynamic import Dispatch
 
@@ -115,6 +116,22 @@ class LUSASSession(ABC):
         inherited from lines, which can be inherited from surfaces, which can
         be inherited from volumes.
         """
+        
+        fe_params_path = join(os.getcwd(), "instance", "fe_params.json")
+        if exists(fe_params_path):
+            print("Loading from JSON")
+            with open(fe_params_path, "r") as f:
+                self.fe_params = json.load(f)
+        else:
+            self.fe_params = {
+                "verticalDirection": "Z",
+                "analysisCategory": "3D",
+                "modelUnits": "kN,m,t,s,C",
+                "lineMeshSpacing": [2],
+                "surfaceMeshSpacing": [0, 0],
+                "volumeMeshSpacing": [2, 2, 2]
+            }
+        
         self.structure_identifiers = extract_structure_identifiers(filename)
         self.bridge_identifier = "-".join(self.structure_identifiers)
         
@@ -134,9 +151,9 @@ class LUSASSession(ABC):
         
         # Defining some traits of the model behaviour.
         self.database.setModelTitle(self.bridge_identifier)
-        self.database.setVerticalDir('Z')
-        self.database.setAnalysisCategory("3D")
-        self.database.setModelUnits("kN,m,t,s,C")
+        self.database.setVerticalDir(self.fe_params["verticalDirection"])
+        self.database.setAnalysisCategory(self.fe_params["analysisCategory"])
+        self.database.setModelUnits(self.fe_params["modelUnits"])
         
         # The following are used repeatedly to store different geometries and
         # assignments.
@@ -198,10 +215,10 @@ class LUSASSession(ABC):
         self.subclass_specific_logic()
         
         # Make basic meshes.
-        self.create_basic_line_mesh(2)
+        self.create_basic_line_mesh(*self.fe_params["lineMeshSpacing"])
         # self.create_equal_line_mesh(1)
-        self.create_basic_surface_mesh(0, 0)
-        self.create_basic_volume_mesh(2, 2, 2)
+        self.create_basic_surface_mesh(*self.fe_params["surfaceMeshSpacing"])
+        self.create_basic_volume_mesh(*self.fe_params["volumeMeshSpacing"])
         
         # Assign the loadcases.
         self.assign_loadcase_from_lvb()
