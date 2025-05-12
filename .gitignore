@@ -12,3 +12,4 @@ Papers/
 fe_models/
 ie_models/
 loadcase_vba_scripts/
+instance/fe_params.json
