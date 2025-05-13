@@ -590,7 +590,6 @@ class LUSASSession(ABC):
             self.setup_modal_analysis(filename)
             self.save_modal_data(filename)
         
-        
         if not self.loading_script_found:
             print(f"Cannot save results for {filename} as no loading script was found.")
             return
@@ -1052,6 +1051,24 @@ class LatticeTower(LUSASSession):
         # Setting the cross-section centroid as L2 (the corner of the L)
         for line_geom in self.database.getAttributes("Line Geometric"):
             line_geom.setEccentricityOrigin("Fibre", "Fibre", "L2", "L2")
+
+    def assign_loadcase_from_lvb(self):
+        """
+        All Mast loadcases are the same, so only creating one file, and apply
+        this to all.
+        """
+        if not self.fe_params["performStaticAnalysis"]:
+            return
+        
+        loadcase_path = join(
+            os.getcwd(), LUSASSession.LOADCASE_FOLDER, "mast_loading.lvb"
+        )
+        if not exists(loadcase_path):
+            return
+
+        self.modeller.fileOpen(loadcase_path)
+        self.loading_script_found = True
+
 
 
 class Monopole(LUSASSession):
