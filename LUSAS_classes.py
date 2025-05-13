@@ -598,14 +598,15 @@ class LUSASSession(ABC):
         if self.fe_params["saveData"]["loading"]:
             self.save_loading_data(filename)
         if self.fe_params["saveData"]["modal"]:
+            self.setup_modal_analysis(filename)
             self.save_modal_data(filename)
      
-    def common_save_params(self, attr):
+    def common_save_params(self, attr, set_results_type, set_analysis_results_type):
         """
         
         """
         attr.setUnits(None)
-        attr.setResultsType("Components")
+        attr.setResultsType(set_results_type)
         attr.setResultsOrder("Mesh")
         attr.setResultsContent("Tabular and Summary")
         attr.setExtent("Elements showing results", "")
@@ -614,7 +615,7 @@ class LUSASSession(ABC):
         primaryComponents = ["All"]
         primaryEntities = ["Displacement"]
         attr.setPrimaryResultsData(primaryComponents, primaryEntities)
-        attr.setAnalysisResultTypes(None)
+        attr.setAnalysisResultTypes(set_analysis_results_type)
         attr.setResultsTransformNone()
         attr.showCoordinates(True)
         attr.showExtremeResults(False)
@@ -648,7 +649,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("PRW Displacement")
         attr.setResultsEntity("Displacement")
         attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
-        self.common_save_params(attr)
+        self.common_save_params(attr, "Components", None)
         self.create_save_folder_and_save(filename, "displacement_results")
     
     def save_reaction_data(self, filename):
@@ -658,7 +659,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("PRW Reaction")
         attr.setResultsEntity("Reaction")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
-        self.common_save_params(attr)
+        self.common_save_params(attr, "Components", None)
         self.create_save_folder_and_save(filename, "reaction_results")
 
     def save_force_moment_beam_data(self, filename):
@@ -668,7 +669,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("Force-Moment_Beam")
         attr.setResultsEntity("Force/Moment - Thick 3D Beam")
         attr.setComponents(["Fx", "Fy", "Fz", "Mx", "My", "Mz"])
-        self.common_save_params(attr)
+        self.common_save_params(attr, "Components", None)
         self.create_save_folder_and_save(filename, "force_moment_beam_results")
     
     def save_force_moment_shell_data(self, filename):
@@ -678,7 +679,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("Force-Moment_Shell")
         attr.setResultsEntity("Force/Moment - Thick Shell")
         attr.setComponents(["Nx", "Ny", "Nxy", "Mx", "My", "Mxy", "Sx", "Sy"])
-        self.common_save_params(attr)
+        self.common_save_params(attr, "Components", None)
         self.create_save_folder_and_save(filename, "force_moment_shell_results")
     
     def save_loading_data(self, filename):
@@ -688,20 +689,84 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("Loading")
         attr.setResultsEntity("Loading")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
-        self.common_save_params(attr)
+        self.common_save_params(attr, "Components", None)
         self.create_save_folder_and_save(filename, "loading_results")
     
     def setup_modal_analysis(self, filename):
         """
         
         """
-        pass
+        analysis = self.database.createAnalysisStructural("Modal_analysis", True, "Nonlinear and transient")
+        analysis.setInheritFromBase("None")
+        analysis.setInheritFromBase("All")
+        analysis.setUndeformedMeshStart()
+        analysis.setCoupled(False)
+        analysis.setSelectedResultsGroup("all")
+        analysis.setSelectedElementOutputGroup("all")
+        analysis.setSelectedNodeOutputGroup("all")
+        
+        #'*** Modify loadcase/control
+        self.database.options().setBoolean("Option 311", False, False, "Modal_analysis")
+        self.database.options().setBoolean("Option 432", False, False, "Modal_analysis")
+        loadcase = self.database.getLoadset("Loadcase 1", 0)
+        loadcase.setEigenvalueMaxMinControl("Frequency", "Minimum", 10)
+        loadcase.getEigenvalueControl().setValue("nivc", 0).setValue("nitem", 30).setValue("namast", 0).setValue("shift", 0.0)
+        loadcase.getEigenvalueControl().setValue("rtol", 0.1E-3).setValue("sturm", True).setValue("Guyan", False).setValue("buckl", False)
+        loadcase.getEigenvalueControl().setValue("NormalisationProcedure", "GlobalMass").setValue("Eigensolver", "Default")
+        
+        #'*** Solve
+        self.database.closeAllResults()
+        self.database.updateMesh()
+        self.database.save()
+        self.database.getAnalysis("Modal_analysis").solve(True)
+        self.database.openAllResults(False)
+        
+        # modal_out_path = join(folder_path, filename, "Modal_analysis.mys")
+        # self.database.openResults(modal_out_path, "Modal_analysis", False, 0, True, False)
+        # print("scanout line is bogus")
+        # self.modeller.scanout("%DBFolder%\bridge_1_1_1_v10_modal~Modal_analysis.out")
         
     def save_modal_data(self, filename):
         """
         
         """
-        pass
+        attr = self.database.createPrintResultsWizard("Frequencies")
+        attr.setResultsEntity("Loading")
+        attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
+        self.common_save_params(attr, "Eigenvalues", ["Eigenvalues"])
+                
+        #'*** Create Mode_shapes
+        attr = self.database.createPrintResultsWizard("Mode_shapes")
+        attr.setUnits(None)
+        attr.setResultsType("Components")
+        attr.setResultsOrder("Mesh")
+        attr.setResultsContent("Tabular")
+        attr.setResultsEntity("Displacement")
+        attr.setExtent("Elements showing results", "")
+        attr.setResultsLocation("Nodal")
+        attr.setLoadcasesOption("Selected")
+        lcIDs = [5] * 10
+        lcResFileIDs = [2] * 10
+        lcEigenvalueIDs = list(range(1, 11))
+        lcHarmonicIDs = [-1] * 10
+
+        attr.setLoadcases(lcIDs, lcResFileIDs, lcEigenvalueIDs, lcHarmonicIDs)
+        attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
+
+        attr.setPrimaryResultsData(["All"], ["Displacement"])
+        attr.setAnalysisResultTypes(["Eigenvalues"])
+        attr.setResultsTransformNone()
+        attr.showCoordinates(False)
+        attr.showExtremeResults(False)
+        attr.setSlice(False)
+        attr.setAllowDerived(False)
+        attr.setDisplayNow(True)
+        attr.showActiveNodesOnly(True)
+        attr.setSigFig(6, False)
+        attr.setThreshold(None)
+        # attr.showResults(False)
+        
+        self.create_save_folder_and_save(filename, "modal_resutls")
 
     def assign_gravity(self):
         """
