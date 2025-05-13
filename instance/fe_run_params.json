@@ -1,0 +1,16 @@
+{
+    "verticalDirection": "Z",
+    "analysisCategory": "3D",
+    "modelUnits": "kN,m,t,s,C",
+    "lineMeshSpacing": [2],
+    "surfaceMeshSpacing": [0, 0],
+    "volumeMeshSpacing": [2, 2, 2],
+    "saveData": {
+        "displacement": true,
+        "reaction": true,
+        "forceMomentBeam": true,
+        "forceMomentShell": true,
+        "loading": true,
+        "modal": true
+    }
+}

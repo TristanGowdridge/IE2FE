@@ -117,7 +117,7 @@ class LUSASSession(ABC):
         be inherited from volumes.
         """
         
-        fe_params_path = join(os.getcwd(), "instance", "fe_params.json")
+        fe_params_path = join(os.getcwd(), "instance", "fe_run_params.json")
         if exists(fe_params_path):
             print("Loading from JSON")
             with open(fe_params_path, "r") as f:
@@ -129,7 +129,15 @@ class LUSASSession(ABC):
                 "modelUnits": "kN,m,t,s,C",
                 "lineMeshSpacing": [2],
                 "surfaceMeshSpacing": [0, 0],
-                "volumeMeshSpacing": [2, 2, 2]
+                "volumeMeshSpacing": [2, 2, 2],
+                "saveData": {
+                    "displacement": True,
+                    "reaction": True,
+                    "forceMomentBeam": True,
+                    "forceMomentShell": True,
+                    "loading": True,
+                    "modal": True
+                }
             }
         
         self.structure_identifiers = extract_structure_identifiers(filename)
@@ -578,9 +586,19 @@ class LUSASSession(ABC):
         if not self.loading_script_found:
             print(f"Cannot save results for {filename} as no loading script was found.")
             return
-
-        self.save_displacement_data(filename)
-        self.save_reaction_data(filename)
+        
+        if self.fe_params["saveData"]["displacement"]:
+            self.save_displacement_data(filename)
+        if self.fe_params["saveData"]["reaction"]:
+            self.save_reaction_data(filename)
+        if self.fe_params["saveData"]["forceMomentBeam"]:
+            self.save_force_moment_beam_data(filename)
+        if self.fe_params["saveData"]["forceMomentShell"]:
+            self.save_force_moment_shell_data(filename)
+        if self.fe_params["saveData"]["loading"]:
+            self.save_loading_data(filename)
+        if self.fe_params["saveData"]["modal"]:
+            self.save_modal_data(filename)
      
     def common_save_params(self, attr):
         """
@@ -607,6 +625,21 @@ class LUSASSession(ABC):
         attr.setSigFig(6, False)
         attr.setThreshold(None)
         attr.showResults(False)
+    
+    def create_save_folder_and_save(self, filename, folder_name):
+        """
+        
+        """
+        folder_path = join(
+            os.getcwd(), LUSASSession.FE_FOLDER, folder_name
+        )
+        if not exists(folder_path):
+            os.mkdir(folder_path)
+        
+        self.modeller.getGridWindowByID(1).saveAllAs(
+            join(folder_path, f"{filename}.txt"), "Text"
+        )
+        self.modeller.getGridWindowByID(1).close()
         
     def save_displacement_data(self, filename):
         """
@@ -616,18 +649,7 @@ class LUSASSession(ABC):
         attr.setResultsEntity("Displacement")
         attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
         self.common_save_params(attr)
-
-        displacement_folder = join(
-            os.getcwd(), LUSASSession.FE_FOLDER, "displacement_results"
-        )
-        if not exists(displacement_folder):
-            os.mkdir(displacement_folder)
-        
-        self.modeller.getGridWindowByID(1).saveAllAs(
-            join(displacement_folder, f"{filename}.txt"), "Text"
-        )
-        
-        self.modeller.getGridWindowByID(1).close()
+        self.create_save_folder_and_save(filename, "displacement_results")
     
     def save_reaction_data(self, filename):
         """
@@ -637,19 +659,50 @@ class LUSASSession(ABC):
         attr.setResultsEntity("Reaction")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
         self.common_save_params(attr)
+        self.create_save_folder_and_save(filename, "reaction_results")
+
+    def save_force_moment_beam_data(self, filename):
+        """
         
-        reaction_folder = join(
-            os.getcwd(), LUSASSession.FE_FOLDER, "reaction_results"
-        )
-        if not exists(reaction_folder):
-            os.mkdir(reaction_folder)
+        """
+        attr = self.database.createPrintResultsWizard("Force-Moment_Beam")
+        attr.setResultsEntity("Force/Moment - Thick 3D Beam")
+        attr.setComponents(["Fx", "Fy", "Fz", "Mx", "My", "Mz"])
+        self.common_save_params(attr)
+        self.create_save_folder_and_save(filename, "force_moment_beam_results")
+    
+    def save_force_moment_shell_data(self, filename):
+        """
         
-        self.modeller.getGridWindowByID(1).saveAllAs(
-            join(reaction_folder, f"{filename}.txt"), "Text"
-        )
+        """
+        attr = self.database.createPrintResultsWizard("Force-Moment_Shell")
+        attr.setResultsEntity("Force/Moment - Thick Shell")
+        attr.setComponents(["Nx", "Ny", "Nxy", "Mx", "My", "Mxy", "Sx", "Sy"])
+        self.common_save_params(attr)
+        self.create_save_folder_and_save(filename, "force_moment_shell_results")
+    
+    def save_loading_data(self, filename):
+        """
         
-        self.modeller.getGridWindowByID(1).close()
+        """
+        attr = self.database.createPrintResultsWizard("Loading")
+        attr.setResultsEntity("Loading")
+        attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
+        self.common_save_params(attr)
+        self.create_save_folder_and_save(filename, "loading_results")
+    
+    def setup_modal_analysis(self, filename):
+        """
         
+        """
+        pass
+        
+    def save_modal_data(self, filename):
+        """
+        
+        """
+        pass
+
     def assign_gravity(self):
         """
         Assign gravity to the model, this was used for debugging procedures at
