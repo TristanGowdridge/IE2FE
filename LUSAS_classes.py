@@ -130,6 +130,9 @@ class LUSASSession(ABC):
                 "lineMeshSpacing": [2],
                 "surfaceMeshSpacing": [0, 0],
                 "volumeMeshSpacing": [2, 2, 2],
+                "performDynamicAnalysis": True,
+                "performStaticAnalysis": True,
+                "nModalFeatures": 10,
                 "saveData": {
                     "displacement": True,
                     "reaction": True,
@@ -583,8 +586,15 @@ class LUSASSession(ABC):
         """
         filename = self.bridge_identifier
         
+        if self.fe_params["saveData"]["modal"] and self.fe_params["performDynamicAnalysis"]:
+            self.setup_modal_analysis(filename)
+            self.save_modal_data(filename)
+        
+        
         if not self.loading_script_found:
             print(f"Cannot save results for {filename} as no loading script was found.")
+            return
+        elif not self.fe_params["performStaticAnalysis"]:
             return
         
         if self.fe_params["saveData"]["displacement"]:
@@ -597,11 +607,8 @@ class LUSASSession(ABC):
             self.save_force_moment_shell_data(filename)
         if self.fe_params["saveData"]["loading"]:
             self.save_loading_data(filename)
-        if self.fe_params["saveData"]["modal"]:
-            self.setup_modal_analysis(filename)
-            self.save_modal_data(filename)
-     
-    def common_save_params(self, attr, set_results_type, set_analysis_results_type):
+
+    def common_save_params(self, attr, set_results_type, set_analysis_results_type, loadcase_option):
         """
         
         """
@@ -611,7 +618,7 @@ class LUSASSession(ABC):
         attr.setResultsContent("Tabular and Summary")
         attr.setExtent("Elements showing results", "")
         attr.setResultsLocation("Nodal")
-        attr.setLoadcasesOption("All")
+        attr.setLoadcasesOption(loadcase_option)
         primaryComponents = ["All"]
         primaryEntities = ["Displacement"]
         attr.setPrimaryResultsData(primaryComponents, primaryEntities)
@@ -649,7 +656,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("PRW Displacement")
         attr.setResultsEntity("Displacement")
         attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
-        self.common_save_params(attr, "Components", None)
+        self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "displacement_results")
     
     def save_reaction_data(self, filename):
@@ -659,7 +666,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("PRW Reaction")
         attr.setResultsEntity("Reaction")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
-        self.common_save_params(attr, "Components", None)
+        self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "reaction_results")
 
     def save_force_moment_beam_data(self, filename):
@@ -669,7 +676,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("Force-Moment_Beam")
         attr.setResultsEntity("Force/Moment - Thick 3D Beam")
         attr.setComponents(["Fx", "Fy", "Fz", "Mx", "My", "Mz"])
-        self.common_save_params(attr, "Components", None)
+        self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "force_moment_beam_results")
     
     def save_force_moment_shell_data(self, filename):
@@ -679,7 +686,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("Force-Moment_Shell")
         attr.setResultsEntity("Force/Moment - Thick Shell")
         attr.setComponents(["Nx", "Ny", "Nxy", "Mx", "My", "Mxy", "Sx", "Sy"])
-        self.common_save_params(attr, "Components", None)
+        self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "force_moment_shell_results")
     
     def save_loading_data(self, filename):
@@ -689,7 +696,7 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("Loading")
         attr.setResultsEntity("Loading")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
-        self.common_save_params(attr, "Components", None)
+        self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "loading_results")
     
     def setup_modal_analysis(self, filename):
@@ -705,7 +712,7 @@ class LUSASSession(ABC):
         analysis.setSelectedElementOutputGroup("all")
         analysis.setSelectedNodeOutputGroup("all")
         
-        #'*** Modify loadcase/control
+        # Modify loadcase/control
         self.database.options().setBoolean("Option 311", False, False, "Modal_analysis")
         self.database.options().setBoolean("Option 432", False, False, "Modal_analysis")
         loadcase = self.database.getLoadset("Loadcase 1", 0)
@@ -714,59 +721,42 @@ class LUSASSession(ABC):
         loadcase.getEigenvalueControl().setValue("rtol", 0.1E-3).setValue("sturm", True).setValue("Guyan", False).setValue("buckl", False)
         loadcase.getEigenvalueControl().setValue("NormalisationProcedure", "GlobalMass").setValue("Eigensolver", "Default")
         
-        #'*** Solve
+        # Solve
         self.database.closeAllResults()
         self.database.updateMesh()
         self.database.save()
         self.database.getAnalysis("Modal_analysis").solve(True)
-        self.database.openAllResults(False)
-        
-        # modal_out_path = join(folder_path, filename, "Modal_analysis.mys")
-        # self.database.openResults(modal_out_path, "Modal_analysis", False, 0, True, False)
-        # print("scanout line is bogus")
-        # self.modeller.scanout("%DBFolder%\bridge_1_1_1_v10_modal~Modal_analysis.out")
+        self.database.openAllResults(True)
         
     def save_modal_data(self, filename):
         """
         
         """
+        # Handle Natural Frequencies
         attr = self.database.createPrintResultsWizard("Frequencies")
         attr.setResultsEntity("Loading")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
-        self.common_save_params(attr, "Eigenvalues", ["Eigenvalues"])
-                
-        #'*** Create Mode_shapes
+        self.common_save_params(attr, "Eigenvalues", ["Eigenvalues"], "All")
+        self.create_save_folder_and_save(filename, "frequencies")
+        
+        # Handle Mode Shapes
         attr = self.database.createPrintResultsWizard("Mode_shapes")
-        attr.setUnits(None)
-        attr.setResultsType("Components")
-        attr.setResultsOrder("Mesh")
-        attr.setResultsContent("Tabular")
-        attr.setResultsEntity("Displacement")
-        attr.setExtent("Elements showing results", "")
-        attr.setResultsLocation("Nodal")
-        attr.setLoadcasesOption("Selected")
-        lcIDs = [5] * 10
-        lcResFileIDs = [2] * 10
-        lcEigenvalueIDs = list(range(1, 11))
-        lcHarmonicIDs = [-1] * 10
+        
+        for loadcase in self.database.getLoadsets("All"):
+            if "Mode" in loadcase.getName():
+                loadcase_id = loadcase.getID()
+                break
+        n_modes = self.fe_params["nModalFeatures"]
+        lcIDs = [loadcase_id] * n_modes
+        lcResFileIDs = [2] * n_modes  # self.database.getAnalyses()[1].getAnalysisResultsFileIDs() to get 2
+        lcEigenvalueIDs = list(range(1, n_modes+1))
+        lcHarmonicIDs = [-1] * n_modes  # Not entirely sure what the -1 is
 
+        attr.setResultsEntity("Displacement")
         attr.setLoadcases(lcIDs, lcResFileIDs, lcEigenvalueIDs, lcHarmonicIDs)
         attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
-
-        attr.setPrimaryResultsData(["All"], ["Displacement"])
-        attr.setAnalysisResultTypes(["Eigenvalues"])
-        attr.setResultsTransformNone()
-        attr.showCoordinates(False)
-        attr.showExtremeResults(False)
-        attr.setSlice(False)
-        attr.setAllowDerived(False)
-        attr.setDisplayNow(True)
-        attr.showActiveNodesOnly(True)
-        attr.setSigFig(6, False)
-        attr.setThreshold(None)
-        # attr.showResults(False)
-        
-        self.create_save_folder_and_save(filename, "modal_resutls")
+        self.common_save_params(attr, "Components", ["Eigenvalues"], "Selected")
+        self.create_save_folder_and_save(filename, "modalshapes")
 
     def assign_gravity(self):
         """
@@ -795,6 +785,9 @@ class LUSASSession(ABC):
         Ask Connor to be more consistent with naming, as need to remove the v10
         from the bridge_identifier.
         """
+        if not self.fe_params["performStaticAnalysis"]:
+            return
+        
         loadcase_path = join(os.getcwd(), LUSASSession.LOADCASE_FOLDER)
         if not exists(loadcase_path):
             return

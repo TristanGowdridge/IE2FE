@@ -5,6 +5,9 @@
     "lineMeshSpacing": [2],
     "surfaceMeshSpacing": [0, 0],
     "volumeMeshSpacing": [2, 2, 2],
+    "performDynamicAnalysis": true,
+    "performStaticAnalysis": true,
+    "nModalFeatures": 10,
     "saveData": {
         "displacement": true,
         "reaction": true,
