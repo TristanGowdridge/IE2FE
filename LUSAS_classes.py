@@ -30,6 +30,7 @@ from ie_to_fe_funcs import order_coords, greedy_cyclic_sort
 from preprocessing_iemodel import extract_profile_info, extract_ie_information
 import beam_functions as bf
 import plate_functions as pf
+import translateAndScale_functions as tasf
 
 
 def extract_structure_identifiers(filename):
@@ -567,6 +568,20 @@ class LUSASSession(ABC):
                 
                 self.assign_surface_geometries(add_profile, plate_identifier)
                 self.selection.remove("All")
+            
+            elif profile_properties[0][1] == "translateAndScale":
+                tas_type = profile_properties[0][0]
+                measurements = dict(profile_properties[1:])
+                tas_type = tas_type.replace('-', '_')
+                tas_function = getattr(tasf, tas_type, None)
+                
+                if tas_function:
+                    tas_identifier = tas_function(self, **measurements)
+                else:
+                    raise IndexError("translateAndScale function does not exist")
+                
+                self.assign_line_geometries(add_profile, tas_identifier)
+                self.selection.remove("All")
 
     def assign_ground_elements(self):
         """
@@ -1083,7 +1098,23 @@ class Monopole(LUSASSession):
         """
     
         """
-        pass
+        lines_to_be_reversed = []
+        for line in self.selection.add("Line", "All").getObjects("Line", "All"):
+            start_point = line.getStartPoint()
+            end_point = line.getEndPoint()
+            p1, p2 = start_point.getXYZ(), end_point.getXYZ()
+            if p2[2] - p1[2] < 0:  # 1) Orient Lines Upwards
+                lines_to_be_reversed.append(line.getID())
+        
+        # Perform reversal
+        self.geom.setAllDefaults()
+        self.geom.cycleReverse(True)
+        self.geom.cycleReset(False)
+        self.selection.remove("All")
+        
+        self.selection.add("Line", lines_to_be_reversed)
+        self.selection.reverse(self.geom)
+        self.selection.remove("All")
 
 
 class WindTurbine(LUSASSession):

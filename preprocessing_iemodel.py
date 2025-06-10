@@ -20,7 +20,8 @@ from ie_to_fe_funcs import distance
 GEOMETRY_TYPES = {
     "beam": "Line",
     "column": "Line",
-    "slab": "Surface"
+    "slab": "Surface",
+    "tower": "Line"
 }
 
 
@@ -138,7 +139,8 @@ def get_geometric_properties(element):
         element["geometry"]["type"]["type"]["type"]["name"],
         element["geometry"]["type"]["type"]["name"]
     )
-    
+    if "faces" in element["geometry"]:
+        dimensions["faces"] = element["geometry"]["faces"]
     return dimensions
 
     
@@ -156,6 +158,21 @@ def extract_profile_info(element):
     Needs scaling
     """
     profile_info = []
+    if element.profile["profile"][1] == "translateAndScale":
+        profile_info.append(("tapered-cylindrical-shell", element.profile["profile"][1]))
+        f1 = element.profile["faces"]["left"]
+        f2 = element.profile["faces"]["right"]
+        
+        # Enforce f1 as the larger of the two faces
+        if f1["dimensions"]["radius"]["value"] < f2["dimensions"]["radius"]["value"]:
+            f1, f2 = f2, f1
+        profile_info.append(("r1", f1["dimensions"]["radius"]["value"]))
+        profile_info.append(("t1", f1["dimensions"]["thickness"]["value"]))
+        profile_info.append(("r2", f2["dimensions"]["radius"]["value"]))
+        profile_info.append(("t2", f2["dimensions"]["thickness"]["value"]))
+        
+        return tuple(profile_info)
+    
     for key, measurement in element.profile.items():
         if key == "profile":
             continue
@@ -335,6 +352,18 @@ def extract_ie_information(filename):
         else:
             raise NotImplementedError("Unknown geometry combination.")
     
+    # For towers, handle the end case from the geometry
+    for name, element in ie_table.items():
+        if len(element.coords) != 1:
+            continue
+        ele = elements[name]
+        geom = ele["geometry"]["dimensions"]["length"]
+        prev_coord = list(list(element.coords)[0])
+        axis_index = {'x': 0, 'y': 1, 'z': 2}[geom["axis"]]
+        prev_coord[axis_index] += geom["value"]
+        element.coords.add(tuple(prev_coord))
+    
+    
     # Combines the points that are within a some threshold distance from one
     # another.
     join_close_points(ie_table, threshold=1e-4)
@@ -345,3 +374,10 @@ def extract_ie_information(filename):
         element.profile = get_geometric_properties(elements[name])
     
     return ie_table
+
+
+
+
+if __name__ == "__main__":
+    ie_table1 = extract_ie_information("./ie_models/mast-2-2-1_v10.json")
+    ie_table2 = extract_ie_information("./ie_models/bridge-1-1-5_v10_dev.json")
