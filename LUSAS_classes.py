@@ -127,7 +127,9 @@ class LUSASSession(ABC):
                 "verticalDirection": "Z",
                 "analysisCategory": "3D",
                 "modelUnits": "kN,m,t,s,C",
+                "useLineDistance": True,
                 "lineMeshSpacing": [2],
+                "lineMeshDistance": [0.5],
                 "surfaceMeshSpacing": [0, 0],
                 "volumeMeshSpacing": [2, 2, 2],
                 "performDynamicAnalysis": True,
@@ -226,8 +228,11 @@ class LUSASSession(ABC):
         self.subclass_specific_logic()
         
         # Make basic meshes.
-        self.create_basic_line_mesh(*self.fe_params["lineMeshSpacing"])
-        # self.create_equal_line_mesh(1)
+        if self.fe_params["useLineDistance"]:
+            self.create_equal_line_mesh(*self.fe_params["lineMeshDistance"])
+        else:
+            self.create_basic_line_mesh(*self.fe_params["lineMeshSpacing"])
+        
         self.create_basic_surface_mesh(*self.fe_params["surfaceMeshSpacing"])
         self.create_basic_volume_mesh(*self.fe_params["volumeMeshSpacing"])
         
@@ -1070,10 +1075,15 @@ class LatticeTower(LUSASSession):
         self.loading_script_found = True
 
 
-
 class Monopole(LUSASSession):
-    def __init__(self):
-        raise NotImplementedError("Monopole not implemented.")
+    def __init__(self, filename):
+        super(Monopole, self).__init__(filename)
+        
+    def subclass_specific_logic(self):
+        """
+    
+        """
+        pass
 
 
 class WindTurbine(LUSASSession):
