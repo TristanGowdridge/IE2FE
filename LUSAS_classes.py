@@ -4,17 +4,28 @@ Created on Tue Mar 11 09:42:57 2025
 
 @author: Tristan Gowdridge
 
-Since different structure types obey different rules, this file incorporates
-the specific logic required for constructing different structure types. This
-file also contains all the logic to sort the structures based on their filename
-where there needs to be included a structure identifier of the form x-y-z,
-where:
-    x: is the structure type, for instance a bridge, mast, or wind turbine.
-    y: is the subclass based on x. For instance is x=1 (bridge), then y=1 is a
-        beam and slab bridge, whereas y=2 is a ladder deck.
-    z: is the structure id. Essentially the numbered occurance of this specific
-        subclass. For all x and y, if there already exists occurences of the
-        subclass, then z has to be unique.
+This module defines structure-type-specific logic for constructing finite
+element (FE) models in LUSAS. It provides a framework for interpreting
+structured filenames and instantiating appropriate subclasses representing
+different civil infrastructure types, such as bridges, masts, and wind
+turbines.
+
+Each structure type can have multiple subclasses, each with its own geometric
+and topological rules. The correct subclass is selected based on a structured
+identifier encoded in the filename.
+
+The core FE logic is handled via a `LUSASSession` instance, which manages:
+    - Creating and configuring a new LUSAS model.
+    - Structure wireframe generation
+    - Parsing a structured identifier from the filename.
+    - Loading and converting Irreducible Element JSON models.
+    - Assigning materials and profiles to the model.
+    - Meshing geometry elements.
+    - Applying subclass-specific modelling logic and loadcases.
+
+The `LUSASSession` class acts as a backend interface and is passed to
+structure-specific subclasses that implement their own logic for geometry and
+model construction.
 """
 import re
 import os
@@ -35,8 +46,44 @@ import translateAndScale_functions as tasf
 
 def extract_structure_identifiers(filename):
     """
+    Extract structure identifiers from a filename. The structure identifiers
+    are later used for the LUSAS model name, and all the respective output
+    data.
+    
+    Filenames must contain a structured identifier in the form `a-b-c-d-e-f`,
+    where each component conveys specific metadata about the structure:
+
+        a: Structure type
+           (e.g., 1 = bridge, 2 = mast, 3 = wind turbine)
+        b: Structure subclass
+           (type-specific; e.g., 1-1 = beam and slab bridge, 1-2 = ladder deck)
+        c: Dataset ID
+           (used to group files by test campaign, location, etc.)
+        d: State ID
+           (represents a structural state, e.g., damaged vs undamaged)
+        e: Structure instance ID
+           (a unique number for the instance of this subclass)
+        f: Variant ID (optional)
+           (used to track slight variations in configuration, materials, etc.)
+
+    The first five identifiers (a-e) are mandatory. If a sixth (variant ID) is
+    provided, it will be included in the output tuple; otherwise, a default
+    value should be handled elsewhere if needed.
+
+    :param filename: The filename containing the structured identifier.
+    :type filename: str
+    :return: Tuple containing:
+        - structure_type (str)
+        - structure_subclass (str)
+        - dataset_id (str)
+        - state_id (str)
+        - structure_id (str)
+        - variant_id (str)
+    :rtype: tuple
+    :raises ValueError: If the filename does not contain all required
+    identifiers.
     """
-    match = re.search(r"(\d+)-(\d+)-(\d+)", filename)
+    match = re.search(r"(\d+)-(\d+)-(\d+)-(\d+)-(\d+)-?(\d+)?", filename)
     
     if match:
         structure_type = match.group(1)
@@ -47,19 +94,24 @@ def extract_structure_identifiers(filename):
         variant_id = match.group(6)
     
     if (structure_type and structure_subclass and dataset_id and structure_id
-            and state_id and variant_id):
+            and state_id):
         return (structure_type, structure_subclass, dataset_id, state_id,
                 structure_id, variant_id)
     else:
         raise ValueError(
-            "Filename must contain a structure identifier of the form x-y-z."
+            "Filename must contain a structure identifier of the form a-b-c-d-e-f."
         )
     
     
 def allocate_subclass(filename):
     """
-    Allocates the appropriate subclass based on the structure identifiers
-    extracted from the filename.
+    Allocate a subclass object based on the structure identifiers in the filename.
+
+    :param filename: Filename containing the structured identifier.
+    :type filename: str
+    :return: Instance of a subclass representing the specific structure type.
+    :rtype: Structure subclass instance
+    :raises ValueError: If the structure type or subclass is invalid.
     """
     structure_type, structure_subclass, _, _, _, _ = extract_structure_identifiers(filename)
 
@@ -93,19 +145,55 @@ def allocate_subclass(filename):
 
 def is_clockwise_about(p1, p2, centre):
     """
-    Calculate the cross product of vectors about some centre. Returns true if
-    the line going from p1 to p2 points clockwise around centre.
+    Determine if the vector from `p1` to `p2` rotates clockwise around a
+    `centre`.
+
+    This is done using the 2D cross product in the XY plane.
+
+    :param p1: First point (x1, y1, z1)
+    :type p1: tuple
+    :param p2: Second point (x2, y2, z2)
+    :type p2: tuple
+    :param centre: Centre point for rotation (cx, cy, cz)
+    :type centre: tuple
+    :return: True if the vector from p1 to p2 is clockwise about the centre.
+    :rtype: bool
     """
     x1, y1, _ = p1
     x2, y2, _ = p2
     cx, cy, _ = centre
 
+    # Compute 2D cross product to determine rotational direction
     cross = (x2 - x1) * (y1 - cy) - (y2 - y1) * (x1 - cx)
     
     return cross < 0
 
 
 class LUSASSession(ABC):
+    """
+    Abstract base class for constructing LUSAS FE models from structured data.
+
+    This class encapsulates the shared logic needed to:
+
+    - Parse structure identifiers from the filename.
+    - Load and interpret instance-exchange (IE) JSON models.
+    - Create a hierarchical wireframe model in LUSAS (volumes > surfaces >
+        lines > points).
+    - Assign materials, profiles, and ground elements.
+    - Apply surface vector orientation and geometric corrections.
+    - Create line, surface, and volume meshes.
+    - Load VBA scripts and assign loadcases.
+    - Save model outputs for downstream analysis.
+
+    Structure-specific subclasses must implement the abstract method
+    :meth:`subclass_specific_logic` to define any behaviour unique to the
+    given structure type or subclass (e.g., beam-and-slab bridge, monopile).
+
+    Geometry and other modelling parameters are read from
+    ``fe_run_params.json`` if it exists; otherwise, a set of default parameters
+    is used.
+    """
+    
     VERSION = "21.1"
     FE_FOLDER = "fe_models"  # Directory where the FE models will be saved.
     IE_FOLDER = "ie_models"  # Directory from where the IE models are loaded.
@@ -257,12 +345,20 @@ class LUSASSession(ABC):
                 
     @abstractmethod
     def subclass_specific_logic(self):
+        """
+        Abstract method requried to be overwritten to provide structure
+        specific behaviour for FE model construction.
+        """
         pass
         
     def create_wireframe(self):
         """
-        Start with the highest dimension geometry and work down, as lower
-        orders are likely subsets of the higher dimensions.
+        Create the wireframe model based on the geometry collection.
+
+        This method processes the geometry elements starting from the highest
+        dimension (Volume) and working down to the lowest dimension (Point).
+        Lower-dimensional elements are likely subsets of higher-dimensional
+        ones, so this processing order is eliminates inefficiency.
         """
         for coords, element in self.geometry_collection["Volume"].items():
             raise NotImplementedError
@@ -278,7 +374,10 @@ class LUSASSession(ABC):
     
     def create_surface(self, element):
         """
-        Create a surface element in the model.
+        This method processes the given surface element by sorting its
+        coordinates, adding them to the model, and creating the surface in the
+        LUSAS database. It also applies surface vector orientation, assigns a
+        unique LUSAS identifier, and processes associated lines.
         """
         surface_key = order_coords(element.coords)
         if surface_key in self.coords_name_map:
@@ -293,8 +392,8 @@ class LUSASSession(ABC):
         pointer = self.database.createSurface(self.geom)
         
         for obj in pointer.getObjects("All"):
-            name = obj.getName()  # index in LUSAS
-            if obj.getTypeCode() == 4:  # Surface
+            name = obj.getName()  # LUSAS index
+            if obj.getTypeCode() == 4:  # Surface type code
                 self.orient_surface_vectors(obj, name)
                 element.lusas_identifier = (element.geometry, name)
                 self.coords_name_map[surface_key] = ("Surface", name)
@@ -302,6 +401,8 @@ class LUSASSession(ABC):
     
     def orient_surface_vectors(self, obj, name):
         """
+        Reverse the orientation of a surface if its normal vector points
+        downwards.
         """
         normal_vector = obj.getNormal()
         if normal_vector[2] < 0:
@@ -318,7 +419,9 @@ class LUSASSession(ABC):
         
     def get_lines_of_surface(self, pointer):
         """
-        Get lines of a surface from the pointer.
+        Get lines of a surface from the pointer. This is used to store the
+        lines created from the faces of higher-dimensional geometries. Also
+        stores the points at the end of the lines.
         """
         for line in pointer.getLOFs():
             start_point = line.getStartPoint()
@@ -332,7 +435,7 @@ class LUSASSession(ABC):
 
     def create_line(self, element):
         """
-        Create a line element in the model.
+        Create a line element and store its endpoints as points in the model.
         """
         line_key = order_coords(element.coords)
         if line_key in self.coords_name_map:
@@ -367,7 +470,8 @@ class LUSASSession(ABC):
         
     def create_basic_volume_mesh(self, sx, sy, sz):
         """
-        Create and assign a basic volume mesh.
+        Create and assign a basic volume mesh, with a specified spacing in each
+        axis.
         """
         self.selection.remove("All")
         # Create and assign a mesh
@@ -390,7 +494,8 @@ class LUSASSession(ABC):
     
     def create_basic_surface_mesh(self, sx, sy):
         """
-        Create and assign a basic surface mesh.
+        Create and assign a basic surface mesh, with a specified spacing in
+        each axis.
         """
         self.selection.remove("All")
         # Create and assign a mesh
@@ -411,10 +516,8 @@ class LUSASSession(ABC):
     
     def create_basic_line_mesh(self, n_divisions):
         """
-        Create and assign a basic line mesh. The parameter n_divisions
-        determines the number of divisions along each line element. This will
-        result is large aspect ratios as all line lengths are unlikely to be
-        the same length.
+        Create and assign a basic line mesh with divisions specified by
+        n_divisions.
         """
         self.selection.remove("All")
         attr = self.database.createMeshLine("LMsh1")
@@ -438,7 +541,7 @@ class LUSASSession(ABC):
     
     def create_equal_line_mesh(self, mesh_length):
         """
-        Creates a node along a line at a spacing of mesh_length.
+        Creates a line mesh with nodes spaced at mesh_length.
         """
         self.selection.remove("All")
         attr = self.database.createMeshLine("LMsh1")
@@ -608,6 +711,7 @@ class LUSASSession(ABC):
 
     def save_results(self):
         """
+        Saves model results based on the analysis settings.
         """
         filename = self.bridge_identifier
         
@@ -634,7 +738,7 @@ class LUSASSession(ABC):
 
     def common_save_params(self, attr, set_results_type, set_analysis_results_type, loadcase_option):
         """
-        
+        Sets common save parameters to avoid repetition in result configuration.
         """
         attr.setUnits(None)
         attr.setResultsType(set_results_type)
@@ -660,7 +764,7 @@ class LUSASSession(ABC):
     
     def create_save_folder_and_save(self, filename, folder_name):
         """
-        
+        Creates a folder and saves the model data to a text file.
         """
         folder_path = join(
             os.getcwd(), LUSASSession.FE_FOLDER, folder_name
@@ -675,7 +779,7 @@ class LUSASSession(ABC):
         
     def save_displacement_data(self, filename):
         """
-        
+        Save nodal displacement results to file.
         """
         attr = self.database.createPrintResultsWizard("PRW Displacement")
         attr.setResultsEntity("Displacement")
@@ -685,7 +789,7 @@ class LUSASSession(ABC):
     
     def save_reaction_data(self, filename):
         """
-        
+        Save reaction force results to file.
         """
         attr = self.database.createPrintResultsWizard("PRW Reaction")
         attr.setResultsEntity("Reaction")
@@ -695,7 +799,7 @@ class LUSASSession(ABC):
 
     def save_force_moment_beam_data(self, filename):
         """
-        
+        Save beam force moment results to file.
         """
         attr = self.database.createPrintResultsWizard("Force-Moment_Beam")
         attr.setResultsEntity("Force/Moment - Thick 3D Beam")
@@ -705,7 +809,7 @@ class LUSASSession(ABC):
     
     def save_force_moment_shell_data(self, filename):
         """
-        
+        Save shell force/moment results to file.
         """
         attr = self.database.createPrintResultsWizard("Force-Moment_Shell")
         attr.setResultsEntity("Force/Moment - Thick Shell")
@@ -715,7 +819,7 @@ class LUSASSession(ABC):
     
     def save_loading_data(self, filename):
         """
-        
+        Save applied loading results to file.
         """
         attr = self.database.createPrintResultsWizard("Loading")
         attr.setResultsEntity("Loading")
@@ -725,7 +829,7 @@ class LUSASSession(ABC):
     
     def setup_modal_analysis(self, filename):
         """
-        
+        Configure and solve the modal analysis.
         """
         analysis = self.database.createAnalysisStructural("Modal_analysis", True, "Nonlinear and transient")
         analysis.setInheritFromBase("None")
@@ -754,7 +858,7 @@ class LUSASSession(ABC):
         
     def save_modal_data(self, filename):
         """
-        
+        Save modal frequencies and mode shapes.
         """
         # Handle Natural Frequencies
         attr = self.database.createPrintResultsWizard("Frequencies")
@@ -784,9 +888,9 @@ class LUSASSession(ABC):
 
     def assign_gravity(self):
         """
-        Assign gravity to the model, this was used for debugging procedures at
-        an early stage. Kept because it's handy to have, despite loadcases now
-        being applied via lvb scripts.
+        Assigns gravity to the model. Originally used for debugging, but
+        retained for convenience in testing or standalone runs where load
+        scripts are not used.
         """
         self.loadcase = self.database.getLoadset("Loadcase 1", 0)
         self.loadcase.addGravity(True)
@@ -794,9 +898,9 @@ class LUSASSession(ABC):
     
     def run_analysis(self, version=1):
         """
-        Run the analysis for the model. This was used for debugging procedures
-        at an early stage. Kept because it's handy to have, despite analyses
-        now being applied via lvb scripts.
+        Runs the analysis for the model. Originally used for debugging, but
+        retained as a convenient way to manually trigger an analysis outside of
+        automated scripts.
         """
         self.database.closeAllResults()
         self.database.updateMesh()
@@ -806,8 +910,8 @@ class LUSASSession(ABC):
 
     def assign_loadcase_from_lvb(self):
         """
-        Ask Connor to be more consistent with naming, as need to remove the v10
-        from the bridge_identifier.
+        Searches for the appropriate loading script and applies it to the model
+        if a matching identifier is found.
         """
         if not self.fe_params["performStaticAnalysis"]:
             return
@@ -817,6 +921,7 @@ class LUSASSession(ABC):
             return
         
         for filename in os.listdir(loadcase_path):
+            print("This is now different, check with Connor")
             match = re.search(r"(\d+)-(\d+)-(\d+)", filename)
             if not match:
                 continue
@@ -827,7 +932,7 @@ class LUSASSession(ABC):
          
     def save_model(self):
         """
-        Save the model in the FE_FOLDER.
+        Saves the current model to the FE folder using the bridge identifier.
         """
         self.database.saveAs(
             join(os.getcwd(), LUSASSession.FE_FOLDER, self.bridge_identifier)
@@ -835,8 +940,10 @@ class LUSASSession(ABC):
         
     def apply_surface_eccentricity(self):
         """
-        Shift the deck up by the height of the supporting side beams so the
-        surface is flush with the side beams.
+        Applies a vertical eccentricity to deck surfaces so that they align
+        flush with adjacent supporting side beams. The shift equals the
+        full beam height plus half the deck thickness, moving the deck
+        upward relative to its original position.
         """
         # Eccentric shift for surfaces respective to their beam geoms.
         surfaces_fixed = set()
@@ -875,9 +982,11 @@ class LUSASSession(ABC):
 
     def correct_perimeter_line_direction_for_geometry(self):
         """
-        For non symmetric beam profiles, specifically YE and UM. The direction
-        of the beam matters. We require the flat side of the beam profile to be
-        the exposed side.
+        Corrects the direction of perimeter lines for asymmetric beam profiles,
+        specifically YE and UM sections, to ensure proper orientation. For
+        these profiles, the exposed (flat) face must align consistently --
+        clockwise for YE and anti-clockwise for UM -- so that they render
+        correctly in the FE model.
         """
         for attr in self.database.getAttributes("Line Geometric"):
             attr_id_and_name = attr.getIDandName()
