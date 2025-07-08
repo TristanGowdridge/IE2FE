@@ -4,7 +4,8 @@ Created on Thu Aug 29 14:59:42 2024
 
 @author: Tristan Gowdridge
 
-The code to create all of the Line geometries used in the IE to FE models.
+Defines the code to create all Line geometries used in IE to FE model
+conversion.
 """
 import json
 import os
@@ -13,8 +14,20 @@ from os.path import exists, join
 
 def _itc_beams_base(lusas_sesh, beam_geom, **measurements):
     """
-    I, T, and C beams have the same structure, and only have one slight
-    difference, this encapsulates all that code.
+    A private function used internally to handle the bulk of the logic to
+    generate a geometric line for I, T, or C beams. The respective beams call
+    this function with the relevant beam_geom.
+
+    These beams share the same structure with minimal variation.
+
+    :param lusas_sesh: Active LUSAS session.
+    :param beam_geom: Beam type ("I", "T", or "C").
+    :param measurements: Required keys:
+        - width
+        - height
+        - webThickness
+        - flangeThickness
+    :return: Unique geometry identifier string.
     """
     beam_dims = {}
     ie_names = ("width", "height", "webThickness", "flangeThickness")
@@ -45,70 +58,81 @@ def _itc_beams_base(lusas_sesh, beam_geom, **measurements):
 
 def i_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for an I-beam.
+
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
     line 461
-    Required:
-        "width" -> B,
-        "height" -> D,
-        "webThickness" -> tw,
-        "flangeThickness" -> tf
+
+    :param measurements: Dictionary with:
+        - width -> B
+        - height -> D
+        - webThickness -> tw
+        - flangeThickness -> tf
+    :return: Geometry identifier string.
     """
     return _itc_beams_base(lusas_sesh, 'I', **measurements)
         
 
 def t_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for a T-beam.
+    
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
     line 462
-    Required:
-        "width",
-        "height",
-        "webThickness",
-        "flangeThickness"
-        
-    width > flangeThickness + 2r (r is assumed 0)
-    height > webThickness + r (r is assumed 0)
+    
+    Required conditions:
+        width > flangeThickness + 2r (r assumed 0)
+        height > webThickness + r (r assumed 0)
+    
+    :param measurements: Dictionary with required keys.
+    :return: Geometry identifier string.
     """
     return _itc_beams_base(lusas_sesh, 'T', **measurements)
 
     
 def c_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for a C-beam.
+    
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
-    line 463
-    Required:
-        "width",
-        "height",
-        "webThickness",
-        "flangeThickness"
+    line 46363
+    
+    :param measurements: Dictionary with:
+        - width
+        - height
+        - webThickness
+        - flangeThickness
+    :return: Geometry identifier string.
     """
     return _itc_beams_base(lusas_sesh, 'C', **measurements)
        
 
 def l_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for an L-beam.
+    
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
     line 507
-    Required:
-        "width",
-        "height",
-        "thickness",
-        "angle"
+    
+    :param measurements: Dictionary with:
+        - width
+        - height
+        - thickness
+        - angle (not currently handled)
+    :return: Geometry identifier string.
     """
     beam_dims = {}
-    
-    print("angle is a thing that im not handling, ask connor?")
     
     ie_names = ("width", "height", "thickness", "thickness")
     lusas_names = ('B', 'D', 'tw', 'tf')
     for ie_name, lusas_name in zip(ie_names, lusas_names):
         beam_dims[lusas_name] = measurements[ie_name]
-    beam_dims['r1'] = 0  #
-    beam_dims['r2'] = 0  #
+    beam_dims['r1'] = 0
+    beam_dims['r2'] = 0
 
     # Create the beam geometry attribute
     ibeam_identifier = f"L Beam {str(measurements)}"
@@ -129,8 +153,14 @@ def l_beam(lusas_sesh, **measurements):
 
 def _yyem_base(lusas_sesh, beam_geom, **measurements):
     """
-    Probs will need to add the cntroid into the json and pass this, rather than
-    working it out from the function.
+    Base function for Y, YE, and M beams using external JSON profiles.
+
+    :param beam_geom: Beam type string, e.g., "Y", "YE", or "M".
+    :param measurements: Dict with:
+        - topWidth
+        - baseWidth
+        - height
+    :return: Geometry identifier string.
     """
     beam_dims = []
     # Order of the key in the beam data json, vital for keying later
@@ -173,47 +203,70 @@ def _yyem_base(lusas_sesh, beam_geom, **measurements):
       
 def y_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for a Y-beam.
+
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
-    line 551
-    Required:
-        "height",
-        "baseWidth",
-        "topWidth"
+    line 511
+
+    :param lusas_sesh: LUSAS session object.
+    :param measurements: Dictionary with:
+        - height
+        - topWidth
+        - baseWidth
+    :return: Geometry identifier string.
     """
     return _yyem_base(lusas_sesh, 'Y', **measurements)
     
 
 def ye_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for a YE-beam.
+
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
     line 552
-    Required:
-        "height",
-        "baseWidth",
-        "topWidth"
+
+    :param lusas_sesh: LUSAS session object.
+    :param measurements: Dictionary with:
+        - topWidth
+        - baseWidth
+        - height
+    :return: Geometry identifier string.
     """
     return _yyem_base(lusas_sesh, "YE", **measurements)
 
 
 def m_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for a YE-beam.
+
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
     line 553
-    Required:
-        "height",
-        "baseWidth",
-        "topWidth"
+
+    :param lusas_sesh: LUSAS session object.
+    :param measurements: Dictionary with:
+        - topWidth
+        - baseWidth
+        - height
+    :return: Geometry identifier string.
     """
     return _yyem_base(lusas_sesh, 'M', **measurements)
 
 
 def _uume_base(lusas_sesh, beam_geom, **measurements):
     """
-    Probs will need to add the cntroid into the json and pass this, rather than
-    working it out from the function.
+    Internal base function for generating U and UM beam geometry.
+
+    :param lusas_sesh: LUSAS session object.
+    :param beam_geom: Beam type string, e.g., "U" or "UM".
+    :param measurements: Dictionary with:
+        - openingWidth
+        - topWidth
+        - baseWidth
+        - height
+    :return: Geometry identifier string.
     """
     beam_dims = []
     # Order of the key in the beam data json, vital for keying later
@@ -251,35 +304,51 @@ def _uume_base(lusas_sesh, beam_geom, **measurements):
 
 def u_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for a U-beam.
+
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
     line 593
-    Required:
-        "height",
-        "baseWidth",
-        "topWidth",
-        "openingWidth"
+
+    :param lusas_sesh: LUSAS session object.
+    :param measurements: Dictionary with:
+        - height
+        - baseWidth
+        - topWidth
+        - openingWidth
+    :return: Geometry identifier string.
     """
     return _uume_base(lusas_sesh, 'U', **measurements)
 
 
 def um_beam(lusas_sesh, **measurements):
     """
+    Create a geometric line for a UM-beam.
+
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
     line 594
-    Required:
-        "height",
-        "baseWidth",
-        "topWidth",
-        "openingWidth"
+
+    :param lusas_sesh: LUSAS session object.
+    :param measurements: Dictionary with:
+        - height
+        - baseWidth
+        - topWidth
+        - openingWidth
+    :return: Geometry identifier string.
     """
     return _uume_base(lusas_sesh, 'UM', **measurements)
 
 
 def rectangular(lusas_sesh, **measurements):
     """
-    
+    Create a geometric line for a rectangular solid beam.
+
+    :param lusas_sesh: LUSAS session object.
+    :param measurements: Dictionary with:
+        - width
+        - height
+    :return: Geometry identifier string.
     """
     beam_dims = {}
 
@@ -307,11 +376,16 @@ def rectangular(lusas_sesh, **measurements):
 
 def circular(lusas_sesh, **measurements):
     """
+    Create a geometric line for a circular solid beam.
+
     https://github.com/dynamics-research-group/pbshm-schema/blob/main/
         model-irreducible-element-geometry-data.json
     line 920
-    Required:
-        "radius"
+
+    :param lusas_sesh: LUSAS session object.
+    :param measurements: Dictionary with:
+        - radius
+    :return: Geometry identifier string.
     """
     beam_dims = {}
 
