@@ -83,7 +83,7 @@ def extract_structure_identifiers(filename):
     :raises ValueError: If the filename does not contain all required
     identifiers.
     """
-    match = re.search(r"(\d+)-(\d+)-(\d+)-(\d+)-(\d+)-?(\d+)?", filename)
+    match = re.search(r"(\d+)-(\d+)-(\d+)-(\d+)-(\d+)?(-[a-zA-Z]*)?", filename)
     
     if match:
         structure_type = match.group(1)
