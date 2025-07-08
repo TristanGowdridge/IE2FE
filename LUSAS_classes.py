@@ -41,10 +41,15 @@ def extract_structure_identifiers(filename):
     if match:
         structure_type = match.group(1)
         structure_subclass = match.group(2)
-        structure_id = match.group(3)
+        dataset_id = match.group(3)
+        state_id = match.group(4)
+        structure_id = match.group(5)
+        variant_id = match.group(6)
     
-    if structure_type and structure_subclass and structure_id:
-        return (structure_type, structure_subclass, structure_id)
+    if (structure_type and structure_subclass and dataset_id and structure_id
+            and state_id and variant_id):
+        return (structure_type, structure_subclass, dataset_id, state_id,
+                structure_id, variant_id)
     else:
         raise ValueError(
             "Filename must contain a structure identifier of the form x-y-z."
@@ -56,7 +61,7 @@ def allocate_subclass(filename):
     Allocates the appropriate subclass based on the structure identifiers
     extracted from the filename.
     """
-    struct_type, struct_subclass, _ = extract_structure_identifiers(filename)
+    structure_type, structure_subclass, _, _, _, _ = extract_structure_identifiers(filename)
 
     # Define a dictionary mapping structure types to their corresponding
     # subclasses
@@ -76,11 +81,11 @@ def allocate_subclass(filename):
 
     # Check if the struct_type and struct_subclass exist in the dictionary
     try:
-        subclass_class = subclasses[struct_type][struct_subclass]
+        subclass_class = subclasses[structure_type][structure_subclass]
     except KeyError:
         raise ValueError(
-            f"Invalid structure type '{struct_type}' or subclass "
-            f"'{struct_subclass}' for filename '{filename}'"
+            f"Invalid structure type '{structure_type}' or subclass "
+            f"'{structure_subclass}' for filename '{filename}'"
         )
     # Instantiate the appropriate subclass with the filename
     return subclass_class(filename)
@@ -1115,6 +1120,23 @@ class Monopole(LUSASSession):
         self.selection.add("Line", lines_to_be_reversed)
         self.selection.reverse(self.geom)
         self.selection.remove("All")
+
+    def assign_loadcase_from_lvb(self):
+        """
+        All Mast loadcases are the same, so only creating one file, and apply
+        this to all.
+        """
+        if not self.fe_params["performStaticAnalysis"]:
+            return
+        
+        loadcase_path = join(
+            os.getcwd(), LUSASSession.LOADCASE_FOLDER, "mast_loading.lvb"
+        )
+        if not exists(loadcase_path):
+            return
+
+        self.modeller.fileOpen(loadcase_path)
+        self.loading_script_found = True
 
 
 class WindTurbine(LUSASSession):
