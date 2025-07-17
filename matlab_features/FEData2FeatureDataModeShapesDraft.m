@@ -28,8 +28,8 @@ fileList = {fileList.name};
 % fe_fre_all = {};
 
 % count = 1;
-% for fileRef = 1:length(fileList)
-for fileRef = 1
+for fileRef = 1:length(fileList)
+% for fileRef = 1
     FileID = fopen(fileList{1, fileRef});
 
     % For testing
@@ -64,7 +64,7 @@ for fileRef = 1
 
     if contains(fileList{1, fileRef},'ModeShapes','IgnoreCase',true)
         dataType = 'eigenMode';        
-        output_folder = 'C:\Users\conno\Documents\ROSEHIPS\PEAR UoS July 25\features';
+        output_folder = 'C:\Users\conno\Documents\ROSEHIPS\PEAR UoS July 25\beam-and-slab\features\eigenMode';
     else
         error('Data type not supported')
     end
@@ -198,8 +198,10 @@ for fileRef = 1
 
         % including the imaginary part
 
-        x_values_objs = [LoadCaseTemp(1:5,6) table(zeros(5,1))];
-        x_values_objs = renamevars(x_values_objs,["DX[m]", "Var1"],["real", "imaginary"]);
+        % these values need to be all in the same precision e.g real:
+        % 0.56e-6 imaginary: 0e0,
+        x_values_objs = [LoadCaseTemp(1:5,6) table(round(zeros(5,1),4,'significant'))];
+        x_values_objs = renamevars(x_values_objs,["DX[m]", "Var1"],["real", "imaginary"]);       
         x_values = struct('indices',coordinates_indices, 'vector',x_values_objs);
 
         y_values_objs = [LoadCaseTemp(1:5,7) table(zeros(5,1))];
@@ -210,14 +212,8 @@ for fileRef = 1
         z_values_objs = renamevars(z_values_objs,["DZ[m]", "Var1"],["real", "imaginary"]);
         z_values = struct('indices',coordinates_indices, 'vector',z_values_objs);
 
-        % jsonencode(x_values,"PrettyPrint",true)
-        x_values_objs = struct();
-        for i = 1
-
-        end
-
-        modeShape = struct('coordinates',struct('global',translational,...
-            'values',struct('unit',valuesUnits{1, 1},'x',x_values,'y',y_values,'z',z_values)));
+        modeShape = struct('coordinates',struct('global',translational),...
+            'values',struct('unit',valuesUnits{1, 1},'x',x_values,'y',y_values,'z',z_values));
 
         % values = struct('values',struct('unit',valuesUnits{1, 1},'x',x_values,'y',y_values,'z',z_values));
         % fprintf(fid,[jsonencode(values)]);
