@@ -252,19 +252,21 @@ def reform_into_feature_schema(loadcases, save_mongo=True, save_csv=False):
         
         # Create the output JSON
         json_file = {
-            "version": si_data["version"],
+            "version": "1.3.1",
             "name": structure_name_filename,
             "population": si_data["population"],
-            "timestamps": loadcases["metadata"]["timestamps"],
-            "selection": {"name": loadcases["metadata"]["structure_name"]},
-            "software": {
-                "name": "IE2FE",
-                "version": "0.1",
-                "source": "https://github.com/TristanGowdridge/IE2FE",
-                "parameters": fe_params
+            "source": {
+                "timestamp": loadcases["metadata"]["timestamps"],
+                "selection": [{"name": loadcases["metadata"]["structure_name"]}],
+                "software": [{
+                    "name": "IE2FE",
+                    "version": "0.1",
+                    "source": "https://github.com/TristanGowdridge/IE2FE",
+                    "parameters": fe_params
+                }],
+                "environment": environment
             },
-            "environment": environment,
-            "features": features
+            "features": [features]
         }
         
         if save_csv:
