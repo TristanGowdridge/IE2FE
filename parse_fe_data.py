@@ -427,8 +427,7 @@ def mode_to_schema(modeshapes, save_csv=False, save_mongo=True):
     
     type_root = "eigen-mode"
     type_header = {
-        "name": "eigenMode",
-        "type": {"name": modeshapes["metadata"]["data_type"]}
+        "name": modeshapes["metadata"]["data_type"]
     }
         
     for key, value in modeshapes.items():
@@ -440,7 +439,7 @@ def mode_to_schema(modeshapes, save_csv=False, save_mongo=True):
         environment = {
             "naturalFrequency": {
                 "description": f"Mode shape {key[1]} of the structure, natural frequency in Hz",
-                "value": key[2]
+                "value": float(key[2])
             }
         }
 
@@ -454,7 +453,11 @@ def mode_to_schema(modeshapes, save_csv=False, save_mongo=True):
             "name": feature_name,
             "type": type_header,
             "variant": variant_id,
-            "coordinates": { "global": { "translational": {
+            "naturalFrequency": {
+                "unit": "Hz",
+                "value": float(key[2])
+            },
+            "modeShape": { "coordinates": { "global": { "translational": {
                 axis: {
                     "indices": {
                         "start": 0,
@@ -470,13 +473,13 @@ def mode_to_schema(modeshapes, save_csv=False, save_mongo=True):
                         "start": 0,
                         "end": len(value_row) - 1
                     },
-                    "vector": list(value_row[1:])
+                    "vector": [{"real": float(i), "imaginary": 0} for i in value_row[1:]]
                 }
                 for value_row, axis in zip(transposed[3:], ('x', 'y', 'z'))
             }
-        }
-        features["coordinates"]["global"]["translational"]["unit"] = 'm'
-        features["values"]["unit"] = modeshapes["metadata"]["units"][key][-1]
+        }}
+        features["modeShape"]["coordinates"]["global"]["translational"]["unit"] = 'm'
+        features["modeShape"]["values"]["unit"] = modeshapes["metadata"]["units"][key][-1]
         
         # Create the output JSON
         json_file = {
@@ -516,7 +519,7 @@ if __name__ == "__main__":
     fe_outputs_folder = r"C:\Users\trist\Desktop\University of Sheffield\ROSEHIPS\IE2FE\fe_outputs"
     filename = "1-1-1_modeshapes.txt"
     modeshapes = parse_eigenmode(fe_outputs_folder, filename)
-    mode_to_schema(modeshapes)
+    mode_to_schema(modeshapes, save_csv=True, save_mongo=False)
     print(f"Time to execute: {time.time() - t0:.2f}s")
     
 
