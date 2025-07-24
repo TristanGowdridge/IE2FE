@@ -185,7 +185,6 @@ def reform_into_feature_schema(loadcases, save_mongo=True, save_csv=False):
     else:
         raise FileNotFoundError
         
-    
     for key, value in loadcases.items():
         if "DeadLoad" in key[1]:
             variant_id = "static"
@@ -300,12 +299,224 @@ def db_get_collection():
     return pymongo.MongoClient(mongodb_uri)[config["database"]][config["collection"]]
 
 
+def parse_eigenmode(folder, filename):
+    """
+    This is largely the same as above, can definitely break down into
+    functions. The only real difference is the different regex to extract the
+    frequency?
+    """
+    if "frequencies" in filename:
+        # All the info that is in the frequencies is also in the mode shape?
+        # I've left this in if needs to be generalised/ expanded at a later
+        # stage.
+        return None
+    elif "modeshapes" in filename:
+        freq_filename = filename.replace("modeshapes", "frequencies")
+        mode_filename = filename
+        pass
+    else:
+        raise FileNotFoundError
+    
+    mode_filepath = os.path.join(folder, mode_filename)
+    
+    modeshapes = defaultdict(list)
+    structure_name = filename.split('_')[0]
+    structure_name = structure_name.replace("bridge-1-1", "bridge-1-1-1-0")
+    modeshapes["metadata"] = {"structure_name": structure_name}
+    modeshapes["metadata"]["data_type"] = "eigenMode"
+
+    current_case = None
+    recording = False
+    in_header = True
+    
+    with open(mode_filepath, 'r') as file:
+        meta_data_retreived = 0
+        for line in file:
+            stripped = line.strip()
+            if in_header:
+                if "Created" in stripped:
+                    dt = datetime.strptime(stripped.split('\t')[-1], "%d/%m/%y %H:%M")
+                    dt = dt.replace(tzinfo=timezone.utc)
+                    timestamp_seconds = dt.timestamp()
+                    timestamp_nanoseconds = int(timestamp_seconds * 1e9)
+                    modeshapes["metadata"]["timestamps"] = {
+                        "generated": timestamp_nanoseconds,
+                        "stored": time.time_ns()
+                    }
+                    meta_data_retreived += 1
+                
+                elif "Model title" in stripped:
+                    modeshapes["metadata"]["title"] = stripped.split('\t')[-1]
+                    meta_data_retreived += 1
+                
+                if meta_data_retreived == 2:
+                    in_header = False
+                continue
+            
+            if not stripped:
+                continue
+            
+            match_reg = re.match(r"^(\d+):Mode\s+(\d+)\s+Frequency\s+=\s+([\d\.]+)", stripped)
+            if match_reg:
+                if stripped.endswith("(Summary)"):
+                    recording = False
+                    continue
+                next(file)  # Skip the blank line
+                loadcase_num = match_reg.group(1)
+                mode_number = match_reg.group(2)
+                frequency = match_reg.group(3)
+                current_case = (loadcase_num, mode_number, frequency)
+                headings = next(file).strip().split('\t')
+                headings.insert(0, "Line Number")
+                modeshapes[current_case].append(headings)
+                recording = True
+                continue
+            
+            if recording:
+                data = stripped.split('\t')
+                modeshapes[current_case].append(data)
+        
+                
+        # Now loop over the extracted data, trim for only the relevant data, and
+        # format
+        for key, value in modeshapes.items():
+            if key == "metadata":
+                modeshapes["metadata"]["units"] = {}
+                continue
+            
+            if len(value[0]) == 9:
+                raise NotImplementedError("Need to implement for old case")
+            elif len(value[0]) == 12:
+                slice_obj = slice(2, 8, 1)
+            else:
+                raise NotImplementedError()
+     
+            for i in range(len(value)):
+                temp = value[i][slice_obj]
+                if i == 0:
+                    units = []
+                    clean_labels = []
+
+                    for label in temp:
+                        match = re.search(r'\[(.*?)\]', label)
+                        if match:
+                            units.append(match.group(1))  # Get the unit inside []
+                            clean_labels.append(re.sub(r'\[.*?\]', '', label))
+                        else:
+                            units.append(None)  # No unit present
+                            clean_labels.append(label)
+                        
+                    value[i] = clean_labels
+                    modeshapes["metadata"]["units"][key] = units
+                    continue
+                
+                value[i] = [cast_str_to_num(val) for val in temp]
+
+    return modeshapes
+
+
+def mode_to_schema(modeshapes, save_csv=False, save_mongo=True):
+    """
+    """
+    params_path = os.path.join(os.getcwd(), "instance", "fe_run_params.json")
+    if not os.path.exists(params_path):
+        raise FileNotFoundError()
+    
+    with open(params_path) as f:
+        fe_params = json.load(f)
+    
+    type_root = "eigen-mode"
+    type_header = {
+        "name": "eigenMode",
+        "type": {"name": modeshapes["metadata"]["data_type"]}
+    }
+        
+    for key, value in modeshapes.items():
+        if key == "metadata":
+            continue
+        variant_id = "acceleration"
+        scenario_id = "3"
+        feature_name = f"{type_root}-whole-structure-modeshape-{key[1]}"
+        environment = {
+            "naturalFrequency": {
+                "description": f"Mode shape {key[1]} of the structure, natural frequency in Hz",
+                "value": key[2]
+            }
+        }
+
+        parts = modeshapes["metadata"]["structure_name"].split('-')
+        parts.insert(-1, scenario_id)
+        structure_name_filename = '-'.join(parts)
+        
+        # Handle the features section
+        transposed = list(zip(*value))
+        features = {
+            "name": feature_name,
+            "type": type_header,
+            "variant": variant_id,
+            "coordinates": { "global": { "translational": {
+                axis: {
+                    "indices": {
+                        "start": 0,
+                        "end": len(coord_row) - 1
+                    },
+                    "vector": list(coord_row[1:])
+                }
+                for coord_row, axis in zip(transposed[:3], ('x', 'y', 'z'))
+            }}},
+            "values": {
+                axis: {
+                    "indices": {
+                        "start": 0,
+                        "end": len(value_row) - 1
+                    },
+                    "vector": list(value_row[1:])
+                }
+                for value_row, axis in zip(transposed[3:], ('x', 'y', 'z'))
+            }
+        }
+        features["coordinates"]["global"]["translational"]["unit"] = 'm'
+        features["values"]["unit"] = modeshapes["metadata"]["units"][key][-1]
+        
+        # Create the output JSON
+        json_file = {
+            "version": "1.3.1",
+            "name": structure_name_filename,
+            "population": 'pear-bridge-beam-and-slab-1',
+            "source": {
+                "timestamp": modeshapes["metadata"]["timestamps"],
+                "selection": [{"name": modeshapes["metadata"]["structure_name"]}],
+                "software": [{
+                    "name": "IE2FE",
+                    "version": "0.1",
+                    "source": "https://github.com/TristanGowdridge/IE2FE",
+                    "parameters": fe_params
+                }],
+                "environment": environment
+            },
+            "features": [features]
+        }
+        
+        if save_csv:
+            save_name = structure_name_filename + "-" + feature_name + ".json"
+            save_folder = os.path.join(os.getcwd(), "parsed_feature_data")
+            if not os.path.isdir(save_folder):
+                os.mkdir(save_folder)
+            save_path = os.path.join(save_folder, save_name)
+            with open(save_path, "w") as f:
+                json.dump(json_file, f, indent=4)
+        
+        if save_mongo:
+            collection_obj = db_get_collection()
+            collection_obj.insert_one(json_file)
+    
+
 if __name__ == "__main__":
     t0 = time.time()
     fe_outputs_folder = r"C:\Users\trist\Desktop\University of Sheffield\ROSEHIPS\IE2FE\fe_outputs"
-    for filename in os.listdir(fe_outputs_folder):
-        loadcases = parse_loadcases(fe_outputs_folder, filename)
-        reform_into_feature_schema(loadcases, save_csv=True)
+    filename = "1-1-1_modeshapes.txt"
+    modeshapes = parse_eigenmode(fe_outputs_folder, filename)
+    mode_to_schema(modeshapes)
     print(f"Time to execute: {time.time() - t0:.2f}s")
     
 
