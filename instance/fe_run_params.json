@@ -2,20 +2,16 @@
     "verticalDirection": "Z",
     "analysisCategory": "3D",
     "modelUnits": "kN,m,t,s,C",
-    "useLineDistance": true,
+    "useLineDistance": false,
     "lineMeshSpacing": [2],
     "lineMeshDistance": [0.5],
     "surfaceMeshSpacing": [0, 0],
     "volumeMeshSpacing": [2, 2, 2],
-    "performDynamicAnalysis": true,
-    "performStaticAnalysis": true,
-    "nModalFeatures": 10,
-    "saveData": {
-        "displacement": true,
-        "reaction": true,
-        "forceMomentBeam": true,
-        "forceMomentShell": true,
-        "loading": true,
-        "modal": true
-    }
+    "nModalFeatures": 10,    
+    "saveDisplacement": true,
+    "saveReaction": true,
+    "saveForceMomentBeam": true,
+    "saveForceMomentShell": true,
+    "saveLoading": true,
+    "saveModal": true
 }

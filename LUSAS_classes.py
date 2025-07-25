@@ -226,17 +226,13 @@ class LUSASSession(ABC):
                 "lineMeshDistance": [0.5],
                 "surfaceMeshSpacing": [0, 0],
                 "volumeMeshSpacing": [2, 2, 2],
-                "performDynamicAnalysis": True,
-                "performStaticAnalysis": True,
                 "nModalFeatures": 10,
-                "saveData": {
-                    "displacement": True,
-                    "reaction": True,
-                    "forceMomentBeam": True,
-                    "forceMomentShell": True,
-                    "loading": True,
-                    "modal": True
-                }
+                "saveDisplacement": True,
+                "saveReaction": True,
+                "saveForceMomentBeam": True,
+                "saveForceMomentShell": True,
+                "saveLoading": True,
+                "saveModal": True
             }
         
         self.structure_identifiers = extract_structure_identifiers(filename)
@@ -715,25 +711,23 @@ class LUSASSession(ABC):
         """
         filename = self.bridge_identifier
         
-        if self.fe_params["saveData"]["modal"] and self.fe_params["performDynamicAnalysis"]:
+        if self.fe_params["saveModal"]:
             self.setup_modal_analysis(filename)
             self.save_modal_data(filename)
         
         if not self.loading_script_found:
             print(f"Cannot save results for {filename} as no loading script was found.")
             return
-        elif not self.fe_params["performStaticAnalysis"]:
-            return
         
-        if self.fe_params["saveData"]["displacement"]:
+        if self.fe_params["saveDisplacement"]:
             self.save_displacement_data(filename)
-        if self.fe_params["saveData"]["reaction"]:
+        if self.fe_params["saveReaction"]:
             self.save_reaction_data(filename)
-        if self.fe_params["saveData"]["forceMomentBeam"]:
+        if self.fe_params["saveForceMomentBeam"]:
             self.save_force_moment_beam_data(filename)
-        if self.fe_params["saveData"]["forceMomentShell"]:
+        if self.fe_params["saveForceMomentShell"]:
             self.save_force_moment_shell_data(filename)
-        if self.fe_params["saveData"]["loading"]:
+        if self.fe_params["saveLoading"]:
             self.save_loading_data(filename)
 
     def common_save_params(self, attr, set_results_type, set_analysis_results_type, loadcase_option):
@@ -912,10 +906,7 @@ class LUSASSession(ABC):
         """
         Searches for the appropriate loading script and applies it to the model
         if a matching identifier is found.
-        """
-        if not self.fe_params["performStaticAnalysis"]:
-            return
-        
+        """        
         loadcase_path = join(os.getcwd(), LUSASSession.LOADCASE_FOLDER)
         if not exists(loadcase_path):
             return
@@ -1191,9 +1182,6 @@ class LatticeTower(LUSASSession):
         All Mast loadcases are the same, so only creating one file, and apply
         this to all.
         """
-        if not self.fe_params["performStaticAnalysis"]:
-            return
-        
         loadcase_path = join(
             os.getcwd(), LUSASSession.LOADCASE_FOLDER, "mast_loading.lvb"
         )
@@ -1235,8 +1223,6 @@ class Monopole(LUSASSession):
         All Mast loadcases are the same, so only creating one file, and apply
         this to all.
         """
-        if not self.fe_params["performStaticAnalysis"]:
-            return
         
         loadcase_path = join(
             os.getcwd(), LUSASSession.LOADCASE_FOLDER, "mast_loading.lvb"
