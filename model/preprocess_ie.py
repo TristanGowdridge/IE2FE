@@ -15,7 +15,7 @@ import os
 from os.path import exists, join
 import warnings
 
-from ie_to_fe_funcs import distance
+from ie_to_fe import distance
 
 GEOMETRY_TYPES = {
     "beam": "Line",

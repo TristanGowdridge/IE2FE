@@ -37,11 +37,11 @@ import json
 
 from win32com.client.dynamic import Dispatch
 
-from ie_to_fe_funcs import order_coords, greedy_cyclic_sort
-from preprocessing_iemodel import extract_profile_info, extract_ie_information
-import beam_functions as bf
-import plate_functions as pf
-import translateAndScale_functions as tasf
+from model.ie_to_fe import order_coords, greedy_cyclic_sort
+from model.preprocess_ie import extract_profile_info, extract_ie_information
+import geometry.beam as bf
+import geometry.plate as pf
+import geometry.translateAndScale as tasf
 
 
 def extract_structure_identifiers(filename):
