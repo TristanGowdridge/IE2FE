@@ -27,21 +27,21 @@ The `LUSASSession` class acts as a backend interface and is passed to
 structure-specific subclasses that implement their own logic for geometry and
 model construction.
 """
-import re
-import os
-from os.path import exists, join
 import ast
-from collections import defaultdict
-from abc import ABC, abstractmethod
 import json
+import os
+import re
+from abc import ABC, abstractmethod
+from collections import defaultdict
+from os.path import exists, join
 
 from win32com.client.dynamic import Dispatch
 
-from model.ie_to_fe import order_coords, greedy_cyclic_sort
-from model.preprocess_ie import extract_profile_info, extract_ie_information
 import geometry.beam as bf
 import geometry.plate as pf
 import geometry.translateAndScale as tasf
+from model.ie_to_fe import order_coords, greedy_cyclic_sort
+from model.preprocess_ie import extract_profile_info, extract_ie_information
 
 
 def extract_structure_identifiers(filename):

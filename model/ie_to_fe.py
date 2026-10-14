@@ -4,14 +4,9 @@ Created on Thu Aug 29 11:03:47 2024
 
 @author: trist
 """
-import os
-import ast
-import re
 import math
-import json
 import warnings
 from decimal import Decimal
-from collections import defaultdict
 
 
 def order_coords(coords):

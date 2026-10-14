@@ -12,8 +12,8 @@ code being nonspecific to LUSAS.
 """
 import json
 import os
-from os.path import exists, join
 import warnings
+from os.path import exists, join
 
 from ie_to_fe import distance
 

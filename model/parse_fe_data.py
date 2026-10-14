@@ -4,16 +4,16 @@ Created on Wed Jul  9 11:23:51 2025
 
 @author: trist
 """
-import re
-import os
-from collections import defaultdict
 import json
-from datetime import datetime, timezone
+import os
+import re
 import time
+from collections import defaultdict
+from datetime import datetime, timezone
 from itertools import accumulate
+from urllib.parse import quote_plus
 
 import pymongo
-from urllib.parse import quote_plus
 
 
 def get_centre_span_locations(si_data):
