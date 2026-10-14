@@ -10,6 +10,7 @@ easily passed on to any Finite Element API. Currently, the only FE API
 implemented is for LUSAS, therefore references to LUSAS are heavy, despite this
 code being nonspecific to LUSAS.
 """
+
 import json
 import os
 import warnings
@@ -17,20 +18,15 @@ from os.path import exists, join
 
 from ie_to_fe import distance
 
-GEOMETRY_TYPES = {
-    "beam": "Line",
-    "column": "Line",
-    "slab": "Surface",
-    "tower": "Line"
-}
+GEOMETRY_TYPES = {"beam": "Line", "column": "Line", "slab": "Surface", "tower": "Line"}
 
 
-class ElementInfo():
+class ElementInfo:
     """
     A class used to represent all the information per element within the IE
     model.
     """
-    
+
     def __init__(self, name, element_type):
         self.name = name
         self.element_type = element_type
@@ -42,40 +38,40 @@ class ElementInfo():
         my_string = f"{self.name}: {self.element_type}"
         for attribute, value in self.__dict__.items():
             my_string += f"\n{attribute} = {value}"
-        
+
         return my_string
-    
+
     def __repr__(self):
         return self.__str__()
-            
+
 
 def get_material_properties(element):
     """
     Extract material properties from the element.
-    
+
     LUSAS requires a minimum of a Young's modulus, density, Poisson's ratio,
     and linear thermal expansion to be defined. These values are extracted from
     the IE model. However, if the IE model does not have this information, the
     missing values are supplied via some default values defined in
     ./data/materials.json.
-    
+
     Needs scaling
     """
     if element["type"] == "ground":
         # If it's a ground elenent, then it has no material properties.
         return {}
-    
+
     element_material = element.get("material")
     try:
         material_name = element_material["matrix"]["base"]["type"]["name"]
     except KeyError:
         material_name = element_material["type"]["type"]["type"]["name"]
-    
+
     lusas_requirements = (
         "youngsModulus",
         "density",
         "poissonsRatio",
-        "linearThermalExpansionCoefficient"
+        "linearThermalExpansionCoefficient",
     )
     material_properties = {}
     if "properties" in element_material:
@@ -87,7 +83,7 @@ def get_material_properties(element):
                     # material_properties[required_property] = unit_scaler(temp_value, temp_unit)
                     material_properties[required_property] = temp_value
                     break
-    
+
     # If there is not enough information regarding the minimum LUSAS material
     # requirements, then use a look-up table fill in the blanks.
     if any(prop not in material_properties.keys() for prop in lusas_requirements):
@@ -101,10 +97,10 @@ def get_material_properties(element):
                 f"Material data file not found: {materials_json_path}."
             )
 
-        with open(materials_json_path, 'r') as f:
+        with open(materials_json_path, "r") as f:
             material_defaults = json.load(f)
-        
-        # Check if the material is present in the default values found in 
+
+        # Check if the material is present in the default values found in
         # materials.json
         if material_name not in material_defaults:
             raise KeyError(
@@ -113,7 +109,7 @@ def get_material_properties(element):
                 ", ".join(lusas_requirements) + ", and default values are not"
                 f" provided for `{material_name}'."
             )
-        
+
         for attribute, value in material_defaults[material_name].items():
             if attribute not in material_properties:
                 #
@@ -121,48 +117,49 @@ def get_material_properties(element):
                 # nondefault values, the material defaults might be wrong.
                 #
                 material_properties[attribute] = value
-    
+
     return material_name, material_properties
 
 
 def get_geometric_properties(element):
     """
     Extract geometric properties from the element.
-    
+
     Needs scaling
     """
     dimensions = {
-        k: v for k, v in element["geometry"]["dimensions"].items()
-        if k != "length"
+        k: v for k, v in element["geometry"]["dimensions"].items() if k != "length"
     }
     dimensions["profile"] = (
         element["geometry"]["type"]["type"]["type"]["name"],
-        element["geometry"]["type"]["type"]["name"]
+        element["geometry"]["type"]["type"]["name"],
     )
     if "faces" in element["geometry"]:
         dimensions["faces"] = element["geometry"]["faces"]
     return dimensions
 
-    
+
 def extract_coordinates(coord_data):
     """
     Need to add scaling here
     """
-    return tuple(coord_data[axis]["value"] for axis in ('x', 'y', 'z'))
+    return tuple(coord_data[axis]["value"] for axis in ("x", "y", "z"))
 
 
 def extract_profile_info(element):
     """
     Extract profile information from the element.
-    
+
     Needs scaling
     """
     profile_info = []
     if element.profile["profile"][1] == "translateAndScale":
-        profile_info.append(("tapered-cylindrical-shell", element.profile["profile"][1]))
+        profile_info.append(
+            ("tapered-cylindrical-shell", element.profile["profile"][1])
+        )
         f1 = element.profile["faces"]["left"]
         f2 = element.profile["faces"]["right"]
-        
+
         # Enforce f1 as the larger of the two faces
         if f1["dimensions"]["radius"]["value"] < f2["dimensions"]["radius"]["value"]:
             f1, f2 = f2, f1
@@ -170,9 +167,9 @@ def extract_profile_info(element):
         profile_info.append(("t1", f1["dimensions"]["thickness"]["value"]))
         profile_info.append(("r2", f2["dimensions"]["radius"]["value"]))
         profile_info.append(("t2", f2["dimensions"]["thickness"]["value"]))
-        
+
         return tuple(profile_info)
-    
+
     for key, measurement in element.profile.items():
         if key == "profile":
             continue
@@ -191,12 +188,12 @@ def get_line_end_coords(coord_center, connected_axis, length_value):
     If there is a Line element connected to a Surface, the midpoint of their
     connection is used as the relationship within the IE model. Therefore, need
     to determine the end coordinates along the length of the surface.
-    
+
     Need to add scaling here
     """
     coord1 = list(extract_coordinates(coord_center))
     coord2 = list(extract_coordinates(coord_center))
-    axis_index = {'x': 0, 'y': 1, 'z': 2}[connected_axis]
+    axis_index = {"x": 0, "y": 1, "z": 2}[connected_axis]
     half_length = length_value / 2
     coord1[axis_index] -= half_length
     coord2[axis_index] += half_length
@@ -216,7 +213,7 @@ def join_close_points(ie_table, threshold=1e-4):
     point_set = set()
     for element in ie_table.values():
         point_set.update(element.coords)
-    
+
     point_map = dict()
     point_list = list(point_set)
     for point1 in point_set:
@@ -225,7 +222,7 @@ def join_close_points(ie_table, threshold=1e-4):
             if distance(point1, point2) < threshold:
                 close_points.append(point2)
         point_map[point1] = min(close_points, key=lambda x: len(str(x)))
-    
+
     for old_point, new_point in point_map.items():
         if old_point != new_point:  # Only different points are processed
             for element in ie_table.values():
@@ -243,44 +240,41 @@ def extract_ie_information(filename):
     # Load the IE model JSON file
     if not exists(filename):
         raise FileNotFoundError(f"Cannot find the IE model {filename}")
-    
+
     with open(filename) as _f:
         ie_model = json.load(_f)["models"]["irreducibleElement"]
-    
+
     # Use a dictionary for speedy lookups and easier name-based indexing at a
     # later stage.
-    elements = {
-        element["name"]: dict(element)
-        for element in ie_model["elements"]
-    }
+    elements = {element["name"]: dict(element) for element in ie_model["elements"]}
     relationships = {
         relationship["name"]: dict(relationship)
         for relationship in ie_model["relationships"]
     }
-    
+
     # From the relationships, determine all the connections and the geometry of
     # the structure.
     ie_table = {}
     for relationship in relationships.values():
         relationship_element1, relationship_element2 = relationship["elements"]
-        
+
         # Get the names involved in the relationships, so more information can
         # be obtained from the elements dictionary.
         element1_name = relationship_element1["name"]
         element2_name = relationship_element2["name"]
-        
+
         # Use the element names from the relationship to obtain the element
         # objects.
         element1 = elements[element1_name]
         element2 = elements[element2_name]
-        
+
         # If the element isn't already being tracked, and is not a ground
         # element, add to the ie_table.
         for element in [element1, element2]:
             ele_name, ele_type = element["name"], element["type"]
             if (ele_name not in ie_table) and (ele_type != "ground"):
                 ie_table[ele_name] = ElementInfo(ele_name, ele_type)
-        
+
         # Determine the geometry of the relationship element (Point, Line,
         # Surface, Volume). Coordinates are appended to a set, these are later
         # used to extract the geometry of each element. The relationships
@@ -301,18 +295,20 @@ def extract_ie_information(filename):
             element_geometry = GEOMETRY_TYPES[element["contextual"]["type"]]
             ie_table[element["name"]].geometry = element_geometry
             geometries.append(element_geometry)
-        
+
         if all(geometry == "Line" for geometry in geometries):
             if "coordinates" in relationship:
                 for_coord = relationship["coordinates"]["global"]["translational"]
             else:
-                for_coord = relationship_element1["coordinates"]["global"]["translational"]
+                for_coord = relationship_element1["coordinates"]["global"][
+                    "translational"
+                ]
             coord = extract_coordinates(for_coord)
-            
+
             for element in (element1, element2):
                 if element["type"] != "ground":
                     ie_table[element["name"]].coords.add(coord)
-        
+
         elif geometries.count("Line") == 1:
             # In the case of a line intersecting a higher-dimensional geometry,
             # we need to dtermine the end point of the line for its
@@ -321,19 +317,21 @@ def extract_ie_information(filename):
             line_element = (element1, element2)[line_index]
             length_axis = line_element["geometry"]["dimensions"]["length"]["axis"]
             length_value = line_element["geometry"]["dimensions"]["length"]["value"]
-            
+
             if "coordinates" in relationship:
                 rel_coord = relationship["coordinates"]["global"]["translational"]
             else:
-                rel_coord = relationship["elements"][line_index]["coordinates"]["global"]["translational"]
-            
+                rel_coord = relationship["elements"][line_index]["coordinates"][
+                    "global"
+                ]["translational"]
+
             p1, p2 = get_line_end_coords(rel_coord, length_axis, length_value)
 
             for element in (element1, element2):
                 if element["type"] != "ground":
                     ie_table[element["name"]].coords.add(p1)
                     ie_table[element["name"]].coords.add(p2)
-        
+
         elif geometries.count("Surface") == 2:
             # Connection between two surfaces has to be extracted more manually
             # by taking out from the element geometries, this process is more
@@ -351,7 +349,7 @@ def extract_ie_information(filename):
             continue
         else:
             raise NotImplementedError("Unknown geometry combination.")
-    
+
     # For towers, handle the end case from the geometry
     for name, element in ie_table.items():
         if len(element.coords) != 1:
@@ -359,23 +357,20 @@ def extract_ie_information(filename):
         ele = elements[name]
         geom = ele["geometry"]["dimensions"]["length"]
         prev_coord = list(list(element.coords)[0])
-        axis_index = {'x': 0, 'y': 1, 'z': 2}[geom["axis"]]
+        axis_index = {"x": 0, "y": 1, "z": 2}[geom["axis"]]
         prev_coord[axis_index] += geom["value"]
         element.coords.add(tuple(prev_coord))
-    
-    
+
     # Combines the points that are within a some threshold distance from one
     # another.
     join_close_points(ie_table, threshold=1e-4)
-    
+
     # Extract the material, and geometric properties foe each element.
     for name, element in ie_table.items():
         element.material = get_material_properties(elements[name])
         element.profile = get_geometric_properties(elements[name])
-    
+
     return ie_table
-
-
 
 
 if __name__ == "__main__":

@@ -29,29 +29,29 @@ def tapered_cylindrical_shell(lusas_sesh, **measurements):
     :rtype: str
     """
     # dim_values is used to create a unique profile name for reference in LUSAS
-    dim_values = ', '.join(map(str, map(float, measurements.values())))
+    dim_values = ", ".join(map(str, map(float, measurements.values())))
     geom_identifier = f"({dim_values})"
     cylinder_identifier = f"Tapered cylinder {geom_identifier}"
-    
+
     # Section 1: define the start face by specifying its coordinates.
     # Reusing a non-unique name will overwrite it in subsequent profiles.
     names = ["D", "t"]
-    values = [2*measurements["r1"], measurements["t1"]]
-    dim_values = ', '.join(map(str, zip(names, values)))
+    values = [2 * measurements["r1"], measurements["t1"]]
+    dim_values = ", ".join(map(str, zip(names, values)))
     geom_identifier1 = f"Sct ({dim_values})"
     attr = lusas_sesh.database.createParametricSection(geom_identifier1)
     attr.setType("Circular Hollow")
     attr.setDimensions(names, values)
-    
+
     # Section 2: define the end face.
     names = ["D", "t"]
-    values = [2*measurements["r2"], measurements["t2"]]
-    dim_values = ', '.join(map(str, zip(names, values)))
+    values = [2 * measurements["r2"], measurements["t2"]]
+    dim_values = ", ".join(map(str, zip(names, values)))
     geom_identifier2 = f"Sct ({dim_values})"
     attr = lusas_sesh.database.createParametricSection(geom_identifier2)
     attr.setType("Circular Hollow")
     attr.setDimensions(names, values)
-    
+
     # Create a geometric line interpolating between the two sections
     attr = lusas_sesh.database.createGeometricLine(cylinder_identifier)
     attr.setValue("elementType", "3D Thick Beam")
@@ -63,5 +63,5 @@ def tapered_cylindrical_shell(lusas_sesh, **measurements):
     attr.setHorizontalAlignment("CenterToCenter")
     attr.setAlignmentSection(0)
     attr.setAnalysisCategory("3D")
-    
+
     return cylinder_identifier

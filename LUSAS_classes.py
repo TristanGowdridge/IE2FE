@@ -27,6 +27,7 @@ The `LUSASSession` class acts as a backend interface and is passed to
 structure-specific subclasses that implement their own logic for geometry and
 model construction.
 """
+
 import ast
 import json
 import os
@@ -49,7 +50,7 @@ def extract_structure_identifiers(filename):
     Extract structure identifiers from a filename. The structure identifiers
     are later used for the LUSAS model name, and all the respective output
     data.
-    
+
     Filenames must contain a structured identifier in the form `a-b-c-d-e-f`,
     where each component conveys specific metadata about the structure:
 
@@ -84,7 +85,7 @@ def extract_structure_identifiers(filename):
     identifiers.
     """
     match = re.search(r"(\d+)-(\d+)-(\d+)-(\d+)-(\d+)?(-[a-zA-Z]*)?", filename)
-    
+
     if match:
         structure_type = match.group(1)
         structure_subclass = match.group(2)
@@ -92,17 +93,28 @@ def extract_structure_identifiers(filename):
         state_id = match.group(4)
         structure_id = match.group(5)
         variant_id = match.group(6)
-    
-    if (structure_type and structure_subclass and dataset_id and structure_id
-            and state_id):
-        return (structure_type, structure_subclass, dataset_id, state_id,
-                structure_id, variant_id)
+
+    if (
+        structure_type
+        and structure_subclass
+        and dataset_id
+        and structure_id
+        and state_id
+    ):
+        return (
+            structure_type,
+            structure_subclass,
+            dataset_id,
+            state_id,
+            structure_id,
+            variant_id,
+        )
     else:
         raise ValueError(
             "Filename must contain a structure identifier of the form a-b-c-d-e-f."
         )
-    
-    
+
+
 def allocate_subclass(filename):
     """
     Allocate a subclass object based on the structure identifiers in the filename.
@@ -113,7 +125,9 @@ def allocate_subclass(filename):
     :rtype: Structure subclass instance
     :raises ValueError: If the structure type or subclass is invalid.
     """
-    structure_type, structure_subclass, _, _, _, _ = extract_structure_identifiers(filename)
+    structure_type, structure_subclass, _, _, _, _ = extract_structure_identifiers(
+        filename
+    )
 
     # Define a dictionary mapping structure types to their corresponding
     # subclasses
@@ -122,13 +136,8 @@ def allocate_subclass(filename):
             "1": BeamAndSlab,
             "2": LadderDeck,
         },
-        "2": {  # Masts
-            "1": LatticeTower,
-            "2": Monopole
-        },
-        "3": {  # Wind Turbines
-            "1": WindTurbine
-        }
+        "2": {"1": LatticeTower, "2": Monopole},  # Masts
+        "3": {"1": WindTurbine},  # Wind Turbines
     }
 
     # Check if the struct_type and struct_subclass exist in the dictionary
@@ -165,7 +174,7 @@ def is_clockwise_about(p1, p2, centre):
 
     # Compute 2D cross product to determine rotational direction
     cross = (x2 - x1) * (y1 - cy) - (y2 - y1) * (x1 - cx)
-    
+
     return cross < 0
 
 
@@ -193,24 +202,24 @@ class LUSASSession(ABC):
     ``fe_run_params.json`` if it exists; otherwise, a set of default parameters
     is used.
     """
-    
+
     VERSION = "21.1"
     FE_FOLDER = "fe_models"  # Directory where the FE models will be saved.
     IE_FOLDER = "ie_models"  # Directory from where the IE models are loaded.
     LOADCASE_FOLDER = "loadcase_vba_scripts"
-    
+
     def __init__(self, filename):
         """
         Initialise a LUSAS session with the given IE path and project name.
         This class is used as a base class for all the structure subclasses,
         and contains all of the logic for creating FE models. The children of
         this class apply the specific logic to creating that subclass.
-        
+
         The logic within this class leverages the fact that points can be
         inherited from lines, which can be inherited from surfaces, which can
         be inherited from volumes.
         """
-        
+
         fe_params_path = join(os.getcwd(), "instance", "fe_run_params.json")
         if exists(fe_params_path):
             print("Loading from JSON")
@@ -232,15 +241,15 @@ class LUSASSession(ABC):
                 "saveForceMomentBeam": True,
                 "saveForceMomentShell": True,
                 "saveLoading": True,
-                "saveModal": True
+                "saveModal": True,
             }
-        
+
         self.structure_identifiers = extract_structure_identifiers(filename)
         self.bridge_identifier = "-".join(self.structure_identifiers)
-        
+
         # Create a new LUSAS modeller instance, this boots up a LUSAS session.
         self.modeller = Dispatch("Lusas.Modeller." + LUSASSession.VERSION)
-        
+
         # Folder to save the FE models
         if not exists(join(os.getcwd(), LUSASSession.FE_FOLDER)):
             os.mkdir(join(os.getcwd(), LUSASSession.FE_FOLDER))
@@ -249,15 +258,15 @@ class LUSASSession(ABC):
         # type and where to save the FE mode.
         self.database = self.modeller.newDatabase(
             "structural",
-            join(os.getcwd(), LUSASSession.FE_FOLDER, self.bridge_identifier)
+            join(os.getcwd(), LUSASSession.FE_FOLDER, self.bridge_identifier),
         )
-        
+
         # Defining some traits of the model behaviour.
         self.database.setModelTitle(self.bridge_identifier)
         self.database.setVerticalDir(self.fe_params["verticalDirection"])
         self.database.setAnalysisCategory(self.fe_params["analysisCategory"])
         self.database.setModelUnits(self.fe_params["modelUnits"])
-        
+
         # The following are used repeatedly to store different geometries and
         # assignments.
         self.selection = self.modeller.getSelection()
@@ -265,27 +274,27 @@ class LUSASSession(ABC):
         self.assignment.setAllDefaults()
         self.geom = self.modeller.getSessionFileGeometryData()
         self.geom.setAllDefaults()
-        
+
         # Used to store the coordinates of the ground elements.
         self.ground_elements = []
-        
+
         # Used as a handy Python-side lookup table to reduce the number of time
         # consuming LUSAS API calls.
         self.coords_name_map = {}
-        
+
         # Used as a flag to run the the simulation if a relevant loading script
         # is found.
         self.loading_script_found = False
-        
+
         ie_path = join(os.getcwd(), LUSASSession.IE_FOLDER, filename)
         if not exists(ie_path):
             raise FileNotFoundError(f"The file {ie_path} does not exist.")
-            
+
         # Extracts all the information from a JSON IE model, and converts it
         # into a more handy table structure, which is used internally in
         # Python.
         self.ie_table = extract_ie_information(ie_path)
-        
+
         # Orders by the geometry types to make use of geometric inheritance.
         # For instance, points are inherited from lines, lines from surfaces,
         # etc...
@@ -296,49 +305,49 @@ class LUSASSession(ABC):
             coords = order_coords(info.coords)
             self.geometry_collection[geom][coords] = info
             self.all_materials.add(info.material[0])
-            
+
             profile_info = extract_profile_info(info)
             self.all_profiles.add(profile_info)
-            
+
             if info.ground_coord:
                 self.ground_elements.extend(info.ground_coord)
-                
+
         self.create_wireframe()
-        
+
         # From the wireframe, we now add specific information.
         self.assign_materials()
         self.assign_profiles()
         self.assign_ground_elements()
-        
+
         # Bridge model fine tuning
         self.apply_surface_eccentricity()
         self.correct_perimeter_line_direction_for_geometry()
-        
+
         # Apply the model specific logic
         self.subclass_specific_logic()
-        
+
         # Make basic meshes.
         if self.fe_params["useLineDistance"]:
             self.create_equal_line_mesh(*self.fe_params["lineMeshDistance"])
         else:
             self.create_basic_line_mesh(*self.fe_params["lineMeshSpacing"])
-        
+
         self.create_basic_surface_mesh(*self.fe_params["surfaceMeshSpacing"])
         self.create_basic_volume_mesh(*self.fe_params["volumeMeshSpacing"])
-        
+
         # Assign the loadcases.
         self.assign_loadcase_from_lvb()
-        
+
         # Save the results to txt.
         self.save_results()
-        
+
         # These need modifying.................................................
         # parsed_data = parse_loadcase_data(project_name)
         # add_to_database(parsed_data)
-        
+
         self.save_model()
         # self.modeller.quit()
-                
+
     @abstractmethod
     def subclass_specific_logic(self):
         """
@@ -346,7 +355,7 @@ class LUSASSession(ABC):
         specific behaviour for FE model construction.
         """
         pass
-        
+
     def create_wireframe(self):
         """
         Create the wireframe model based on the geometry collection.
@@ -358,16 +367,16 @@ class LUSASSession(ABC):
         """
         for coords, element in self.geometry_collection["Volume"].items():
             raise NotImplementedError
-        
+
         for coords, element in self.geometry_collection["Surface"].items():
             self.create_surface(element)
-        
+
         for coords, element in self.geometry_collection["Line"].items():
             self.create_line(element)
-              
+
         for coords, element in self.geometry_collection["Point"].items():
             raise NotImplementedError
-    
+
     def create_surface(self, element):
         """
         This method processes the given surface element by sorting its
@@ -378,7 +387,7 @@ class LUSASSession(ABC):
         surface_key = order_coords(element.coords)
         if surface_key in self.coords_name_map:
             print("Surface already exists could optimise for lookup")
-        
+
         sorted_points = greedy_cyclic_sort(list(element.coords))
         self.geom.setAllDefaults()
         self.geom.setCreateMethod("coons")
@@ -386,7 +395,7 @@ class LUSASSession(ABC):
             self.geom.addCoords(*sorted_point)
         self.geom.setLowerOrderGeometryType("coordinates")
         pointer = self.database.createSurface(self.geom)
-        
+
         for obj in pointer.getObjects("All"):
             name = obj.getName()  # LUSAS index
             if obj.getTypeCode() == 4:  # Surface type code
@@ -394,7 +403,7 @@ class LUSASSession(ABC):
                 element.lusas_identifier = (element.geometry, name)
                 self.coords_name_map[surface_key] = ("Surface", name)
                 self.get_lines_of_surface(obj)
-    
+
     def orient_surface_vectors(self, obj, name):
         """
         Reverse the orientation of a surface if its normal vector points
@@ -412,7 +421,7 @@ class LUSASSession(ABC):
             tempSetA.add(self.selection, "Surface")
             tempSetA.reverse(self.geom)
         self.selection.remove("All")
-        
+
     def get_lines_of_surface(self, pointer):
         """
         Get lines of a surface from the pointer. This is used to store the
@@ -439,14 +448,14 @@ class LUSASSession(ABC):
             # skip creating.
             element.lusas_identifier = self.coords_name_map[line_key]
             return
-        
+
         self.geom.setAllDefaults()
         self.geom.setCreateMethod("straight")
-        
+
         for point in element.coords:
             self.geom.addCoords(*point)
         self.geom.setLowerOrderGeometryType("coordinates")
-        
+
         objects = self.database.createLine(self.geom)
 
         for obj in objects.getObjects("All"):
@@ -455,15 +464,15 @@ class LUSASSession(ABC):
                 break
         else:
             raise TypeError("No lines in object set?")
-        
+
         self.coords_name_map[line_key] = ("Line", line.getName())
         element.lusas_identifier = (element.geometry, line.getName())
-        
+
         p1 = line.getStartPoint()
         p2 = line.getEndPoint()
         self.coords_name_map[p1.getXYZ()] = ("Point", p1.getName())
         self.coords_name_map[p2.getXYZ()] = ("Point", p2.getName())
-        
+
     def create_basic_volume_mesh(self, sx, sy, sz):
         """
         Create and assign a basic volume mesh, with a specified spacing in each
@@ -472,22 +481,21 @@ class LUSASSession(ABC):
         self.selection.remove("All")
         # Create and assign a mesh
         self.selection.add("Volume", "All")
-    
+
         attr = self.database.createMeshVolume("VMsh1")
         attr.setRegular("HX8M", sx, sy, sz, False)
         attr.setValue("allowIrregular", True)
         attr.setAnalysisCategory("3D")
-    
+
         self.assignment.setSelectionNone()
         self.assignment.addToSelection("Volume")
         self.assignment.setLoadset("Loadcase 1")
         self.database.getAttribute("Volume Mesh", "VMsh1").assignTo(
-            self.selection,
-            self.assignment
+            self.selection, self.assignment
         )
         self.database.updateMesh()
         self.selection.remove("All")
-    
+
     def create_basic_surface_mesh(self, sx, sy):
         """
         Create and assign a basic surface mesh, with a specified spacing in
@@ -496,12 +504,12 @@ class LUSASSession(ABC):
         self.selection.remove("All")
         # Create and assign a mesh
         self.selection.add("Surface", "All")
-    
+
         attr = self.database.createMeshSurface("SMsh1")
         attr.setRegular("QTS4", sx, sy, True)
         attr.setValue("allowIrregular", True)
         attr.setAnalysisCategory("3D")
-    
+
         self.assignment.setAllDefaults()
         self.assignment.setLoadset("Loadcase 1")
         self.database.getAttribute("Surface Mesh", "SMsh1").assignTo(
@@ -509,7 +517,7 @@ class LUSASSession(ABC):
         )
         self.database.updateMesh()
         self.selection.remove("All")
-    
+
     def create_basic_line_mesh(self, n_divisions):
         """
         Create and assign a basic line mesh with divisions specified by
@@ -522,19 +530,18 @@ class LUSASSession(ABC):
         attr.setEndReleasesSameAsStart(True)
         attr.setValue("uiSpacing", "uniform")
         attr.setAnalysisCategory("3D")
-        
+
         self.selection.add("Line", "All")
-        
+
         self.assignment.setSelectionNone()
         self.assignment.addToSelection("Line")
         self.assignment.setLoadset("Loadcase 1")
         self.database.getAttribute("Line Mesh", "LMsh1").assignTo(
-            self.selection,
-            self.assignment
+            self.selection, self.assignment
         )
         self.database.updateMesh()
         self.selection.remove("All")
-    
+
     def create_equal_line_mesh(self, mesh_length):
         """
         Creates a line mesh with nodes spaced at mesh_length.
@@ -545,19 +552,18 @@ class LUSASSession(ABC):
         attr.setEndReleasesSameAsStart(True)
         attr.setValue("uiSpacing", "irregular")
         attr.setAnalysisCategory("3D")
-        
+
         self.selection.add("Line", "All")
-        
+
         self.assignment.setSelectionNone()
         self.assignment.addToSelection("Line")
         self.assignment.setLoadset("Loadcase 1")
         self.database.getAttribute("Line Mesh", "LMsh1").assignTo(
-            self.selection,
-            self.assignment
+            self.selection, self.assignment
         )
         self.database.updateMesh()
         self.selection.remove("All")
-        
+
     def assign_line_geometries(self, lines, geometry_identifier):
         """
         Add a cross-section to the specified lines.
@@ -573,7 +579,7 @@ class LUSASSession(ABC):
             self.selection, self.assignment
         )
         self.selection.remove("All")
-    
+
     def assign_surface_geometries(self, surfaces, geometry_identifier):
         """
         Add a cross-section to the specified surfaces.
@@ -589,7 +595,7 @@ class LUSASSession(ABC):
             self.selection, self.assignment
         )
         self.selection.remove("All")
-    
+
     def create_material(self, material_name, material_properties):
         """
         Create a material with the given properties.
@@ -598,15 +604,15 @@ class LUSASSession(ABC):
             material_name,
             material_properties["youngsModulus"],
             material_properties["poissonsRatio"],
-            material_properties["density"]
+            material_properties["density"],
         ).setValue(
             "alpha",  # Parameter being set
             material_properties["linearThermalExpansionCoefficient"],  # value
-            0
+            0,
         )
         attr.setDefinitionMenuID(1, None, True)
         attr.setDescription(f"Description for {material_name.title()}")
-    
+
     def assign_materials(self):
         """
         Assign materials to their corresponding FE elements.
@@ -620,8 +626,10 @@ class LUSASSession(ABC):
                         # This does assume that every material by the same name
                         # has the same property values.
                         material_properties = element.material[1]
-                    elements_to_select[element.lusas_identifier[0]].append(element.lusas_identifier[1])
-            
+                    elements_to_select[element.lusas_identifier[0]].append(
+                        element.lusas_identifier[1]
+                    )
+
             self.selection.remove("All")
             # Select all the elements that have this material.
             for geometry, ids in elements_to_select.items():
@@ -629,7 +637,9 @@ class LUSASSession(ABC):
             self.create_material(material, material_properties)
             self.assignment.setAllDefaults()
             self.assignment.setLoadset("Loadcase 1")
-            self.database.getAttribute("Isotropic Material", material).assignTo(self.selection, self.assignment)
+            self.database.getAttribute("Isotropic Material", material).assignTo(
+                self.selection, self.assignment
+            )
             self.selection.remove("All")
 
     def assign_profiles(self):
@@ -644,46 +654,46 @@ class LUSASSession(ABC):
                     if not profile_properties:
                         profile_properties = profile
                     add_profile.append(element.lusas_identifier[1])
-              
+
             if profile_properties[0][1] == "beam":
                 beam_type = profile_properties[0][0]
                 measurements = dict(profile_properties[1:])
-                beam_type = beam_type.replace('-', '_')
+                beam_type = beam_type.replace("-", "_")
                 beam_function = getattr(bf, beam_type, None)
-                
+
                 if beam_function:
                     beam_identifier = beam_function(self, **measurements)
                 else:
                     raise IndexError("Beam function does not exist")
-                
+
                 self.assign_line_geometries(add_profile, beam_identifier)
                 self.selection.remove("All")
-            
+
             elif profile_properties[0][1] == "plate":
                 plate_type = profile_properties[0][0]
                 measurements = dict(profile_properties[1:])
-                plate_type = plate_type.replace('-', '_')
+                plate_type = plate_type.replace("-", "_")
                 plate_function = getattr(pf, plate_type, None)
-                
+
                 if plate_function:
                     plate_identifier = plate_function(self, **measurements)
                 else:
                     raise IndexError("Plate function does not exist")
-                
+
                 self.assign_surface_geometries(add_profile, plate_identifier)
                 self.selection.remove("All")
-            
+
             elif profile_properties[0][1] == "translateAndScale":
                 tas_type = profile_properties[0][0]
                 measurements = dict(profile_properties[1:])
-                tas_type = tas_type.replace('-', '_')
+                tas_type = tas_type.replace("-", "_")
                 tas_function = getattr(tasf, tas_type, None)
-                
+
                 if tas_function:
                     tas_identifier = tas_function(self, **measurements)
                 else:
                     raise IndexError("translateAndScale function does not exist")
-                
+
                 self.assign_line_geometries(add_profile, tas_identifier)
                 self.selection.remove("All")
 
@@ -701,24 +711,24 @@ class LUSASSession(ABC):
         self.selection.add("Point", ground_points)
         self.assignment.setAllDefaults()
         self.assignment.setLoadset("Loadcase 1")
-        self.database.getAttribute(
-            "Structural Support", "Ground"
-        ).assignTo(self.selection, self.assignment)
+        self.database.getAttribute("Structural Support", "Ground").assignTo(
+            self.selection, self.assignment
+        )
 
     def save_results(self):
         """
         Saves model results based on the analysis settings.
         """
         filename = self.bridge_identifier
-        
+
         if self.fe_params["saveModal"]:
             self.setup_modal_analysis(filename)
             self.save_modal_data(filename)
-        
+
         if not self.loading_script_found:
             print(f"Cannot save results for {filename} as no loading script was found.")
             return
-        
+
         if self.fe_params["saveDisplacement"]:
             self.save_displacement_data(filename)
         if self.fe_params["saveReaction"]:
@@ -730,7 +740,9 @@ class LUSASSession(ABC):
         if self.fe_params["saveLoading"]:
             self.save_loading_data(filename)
 
-    def common_save_params(self, attr, set_results_type, set_analysis_results_type, loadcase_option):
+    def common_save_params(
+        self, attr, set_results_type, set_analysis_results_type, loadcase_option
+    ):
         """
         Sets common save parameters to avoid repetition in result configuration.
         """
@@ -755,22 +767,20 @@ class LUSASSession(ABC):
         attr.setSigFig(6, False)
         attr.setThreshold(None)
         attr.showResults(False)
-    
+
     def create_save_folder_and_save(self, filename, folder_name):
         """
         Creates a folder and saves the model data to a text file.
         """
-        folder_path = join(
-            os.getcwd(), LUSASSession.FE_FOLDER, folder_name
-        )
+        folder_path = join(os.getcwd(), LUSASSession.FE_FOLDER, folder_name)
         if not exists(folder_path):
             os.mkdir(folder_path)
-        
+
         self.modeller.getGridWindowByID(1).saveAllAs(
             join(folder_path, f"{filename}.txt"), "Text"
         )
         self.modeller.getGridWindowByID(1).close()
-        
+
     def save_displacement_data(self, filename):
         """
         Save nodal displacement results to file.
@@ -780,7 +790,7 @@ class LUSASSession(ABC):
         attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
         self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "displacement_results")
-    
+
     def save_reaction_data(self, filename):
         """
         Save reaction force results to file.
@@ -800,7 +810,7 @@ class LUSASSession(ABC):
         attr.setComponents(["Fx", "Fy", "Fz", "Mx", "My", "Mz"])
         self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "force_moment_beam_results")
-    
+
     def save_force_moment_shell_data(self, filename):
         """
         Save shell force/moment results to file.
@@ -810,7 +820,7 @@ class LUSASSession(ABC):
         attr.setComponents(["Nx", "Ny", "Nxy", "Mx", "My", "Mxy", "Sx", "Sy"])
         self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "force_moment_shell_results")
-    
+
     def save_loading_data(self, filename):
         """
         Save applied loading results to file.
@@ -820,12 +830,14 @@ class LUSASSession(ABC):
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
         self.common_save_params(attr, "Components", None, "All")
         self.create_save_folder_and_save(filename, "loading_results")
-    
+
     def setup_modal_analysis(self, filename):
         """
         Configure and solve the modal analysis.
         """
-        analysis = self.database.createAnalysisStructural("Modal_analysis", True, "Nonlinear and transient")
+        analysis = self.database.createAnalysisStructural(
+            "Modal_analysis", True, "Nonlinear and transient"
+        )
         analysis.setInheritFromBase("None")
         analysis.setInheritFromBase("All")
         analysis.setUndeformedMeshStart()
@@ -833,23 +845,29 @@ class LUSASSession(ABC):
         analysis.setSelectedResultsGroup("all")
         analysis.setSelectedElementOutputGroup("all")
         analysis.setSelectedNodeOutputGroup("all")
-        
+
         # Modify loadcase/control
         self.database.options().setBoolean("Option 311", False, False, "Modal_analysis")
         self.database.options().setBoolean("Option 432", False, False, "Modal_analysis")
         loadcase = self.database.getLoadset("Loadcase 1", 0)
         loadcase.setEigenvalueMaxMinControl("Frequency", "Minimum", 10)
-        loadcase.getEigenvalueControl().setValue("nivc", 0).setValue("nitem", 30).setValue("namast", 0).setValue("shift", 0.0)
-        loadcase.getEigenvalueControl().setValue("rtol", 0.1E-3).setValue("sturm", True).setValue("Guyan", False).setValue("buckl", False)
-        loadcase.getEigenvalueControl().setValue("NormalisationProcedure", "GlobalMass").setValue("Eigensolver", "Default")
-        
+        loadcase.getEigenvalueControl().setValue("nivc", 0).setValue(
+            "nitem", 30
+        ).setValue("namast", 0).setValue("shift", 0.0)
+        loadcase.getEigenvalueControl().setValue("rtol", 0.1e-3).setValue(
+            "sturm", True
+        ).setValue("Guyan", False).setValue("buckl", False)
+        loadcase.getEigenvalueControl().setValue(
+            "NormalisationProcedure", "GlobalMass"
+        ).setValue("Eigensolver", "Default")
+
         # Solve
         self.database.closeAllResults()
         self.database.updateMesh()
         self.database.save()
         self.database.getAnalysis("Modal_analysis").solve(True)
         self.database.openAllResults(True)
-        
+
     def save_modal_data(self, filename):
         """
         Save modal frequencies and mode shapes.
@@ -860,18 +878,20 @@ class LUSASSession(ABC):
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
         self.common_save_params(attr, "Eigenvalues", ["Eigenvalues"], "All")
         self.create_save_folder_and_save(filename, "frequencies")
-        
+
         # Handle Mode Shapes
         attr = self.database.createPrintResultsWizard("Mode_shapes")
-        
+
         for loadcase in self.database.getLoadsets("All"):
             if "Mode" in loadcase.getName():
                 loadcase_id = loadcase.getID()
                 break
         n_modes = self.fe_params["nModalFeatures"]
         lcIDs = [loadcase_id] * n_modes
-        lcResFileIDs = [2] * n_modes  # self.database.getAnalyses()[1].getAnalysisResultsFileIDs() to get 2
-        lcEigenvalueIDs = list(range(1, n_modes+1))
+        lcResFileIDs = [
+            2
+        ] * n_modes  # self.database.getAnalyses()[1].getAnalysisResultsFileIDs() to get 2
+        lcEigenvalueIDs = list(range(1, n_modes + 1))
         lcHarmonicIDs = [-1] * n_modes  # Not entirely sure what the -1 is
 
         attr.setResultsEntity("Displacement")
@@ -889,7 +909,7 @@ class LUSASSession(ABC):
         self.loadcase = self.database.getLoadset("Loadcase 1", 0)
         self.loadcase.addGravity(True)
         self.loadcase.setGravityFactor(1)
-    
+
     def run_analysis(self, version=1):
         """
         Runs the analysis for the model. Originally used for debugging, but
@@ -906,11 +926,11 @@ class LUSASSession(ABC):
         """
         Searches for the appropriate loading script and applies it to the model
         if a matching identifier is found.
-        """        
+        """
         loadcase_path = join(os.getcwd(), LUSASSession.LOADCASE_FOLDER)
         if not exists(loadcase_path):
             return
-        
+
         for filename in os.listdir(loadcase_path):
             print("This is now different, check with Connor")
             match = re.search(r"(\d+)-(\d+)-(\d+)", filename)
@@ -920,7 +940,7 @@ class LUSASSession(ABC):
                 self.modeller.fileOpen(join(loadcase_path, filename))
                 self.loading_script_found = True
                 break
-         
+
     def save_model(self):
         """
         Saves the current model to the FE folder using the bridge identifier.
@@ -928,7 +948,7 @@ class LUSASSession(ABC):
         self.database.saveAs(
             join(os.getcwd(), LUSASSession.FE_FOLDER, self.bridge_identifier)
         )
-        
+
     def apply_surface_eccentricity(self):
         """
         Applies a vertical eccentricity to deck surfaces so that they align
@@ -941,27 +961,27 @@ class LUSASSession(ABC):
         for obj in self.selection.add("Surface", "All").getObjects("Surface", "All"):
             if obj.getID() in surfaces_fixed:
                 continue
-            
+
             surf_geom_ass = obj.getAssignments("Geometric")[0]
             surf_geom = surf_geom_ass.getAttribute()
-            
+
             for in_selection in self.selection.add(surf_geom).getObjects("All"):
                 if in_selection.getTypeCode() == 4:
                     surfaces_fixed.add(in_selection.getID())
-            
+
             surface_name = surf_geom.getName()
             thickness = surf_geom.getValue("t")
-            
+
             height = 0
             for lof in obj.getLOFs():
                 if lof.getTypeCode() != 2:
                     continue
 
                 attr = lof.getAssignments("Geometric")[0].getAttribute()
-                if 'D' in attr.getValueNames():
+                if "D" in attr.getValueNames():
                     height = max(height, attr.getValue("D"))
-                
-                else: ## This is pretty bodgy, cause getting dim from the name of the attribute.
+
+                else:  ## This is pretty bodgy, cause getting dim from the name of the attribute.
                     attr_name = attr.getName()
                     re_match = re.search(r"\{.*\}", attr_name)
                     if re_match:
@@ -969,7 +989,7 @@ class LUSASSession(ABC):
                         height = max(height, measurements["height"])
 
             attr = self.database.createGeometricSurface(surface_name)
-            attr.setSurface(thickness, -(height + thickness/2))
+            attr.setSurface(thickness, -(height + thickness / 2))
 
     def correct_perimeter_line_direction_for_geometry(self):
         """
@@ -981,9 +1001,9 @@ class LUSASSession(ABC):
         """
         for attr in self.database.getAttributes("Line Geometric"):
             attr_id_and_name = attr.getIDandName()
-            attr_id, attr_name = attr_id_and_name.split(':')[:2]
+            attr_id, attr_name = attr_id_and_name.split(":")[:2]
             beam_geometry = attr_name.split()[1]
-            
+
             match = re.match(r"^([A-Z]{1,2})(\d{1,2})$", beam_geometry)
             if match:
                 letters = match.group(1)
@@ -993,25 +1013,24 @@ class LUSASSession(ABC):
                     reverse_condition = 1
                 else:
                     continue
-                
+
                 lines_to_be_reversed = []
                 for beam in self.selection.add(attr).getObjects("Line", "All"):
                     facet_coords = beam.getFacetCoordinates()
                     p1, p2 = facet_coords[:3], facet_coords[3:]
                     dx = p2[0] - p1[0]
-            
-                    if (
-                            ((p1[1] == 0) and (dx * reverse_condition < 0)) or
-                            ((p1[1] != 0) and (dx * reverse_condition > 0 ))
-                        ):
+
+                    if ((p1[1] == 0) and (dx * reverse_condition < 0)) or (
+                        (p1[1] != 0) and (dx * reverse_condition > 0)
+                    ):
                         lines_to_be_reversed.append(beam.getID())
-                    
+
                 # Perform reversal
                 self.geom.setAllDefaults()
                 self.geom.cycleReverse(True)
                 self.geom.cycleReset(False)
                 self.selection.remove("All")
-                
+
                 self.selection.add("Line", lines_to_be_reversed)
                 self.selection.reverse(self.geom)
                 self.selection.remove("All")
@@ -1020,7 +1039,7 @@ class LUSASSession(ABC):
 class BeamAndSlab(LUSASSession):
     def __init__(self, filename):
         super(BeamAndSlab, self).__init__(filename)
-    
+
     def subclass_specific_logic(self):
         """
         There is no additional specific logic for the beam and slab bridge, but
@@ -1032,7 +1051,7 @@ class BeamAndSlab(LUSASSession):
 class LadderDeck(LUSASSession):
     def __init__(self, filename):
         super(LadderDeck, self).__init__(filename)
-    
+
     def subclass_specific_logic(self):
         """
         Ladder deck specific implementation, in this case it is required that
@@ -1048,28 +1067,34 @@ class LadderDeck(LUSASSession):
             facet_coords = lof.getFacetCoordinates()
             p1, p2 = facet_coords[:3], facet_coords[3:]
             dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-            
+
             if abs(dy) < 1e-5:
-                profile_name = lof.getAssignments("Geometric")[0].getAttribute().getName()
+                profile_name = (
+                    lof.getAssignments("Geometric")[0].getAttribute().getName()
+                )
                 main_span_profiles.add(profile_name)
-            
+
             if abs(dx) < 1e-5:
-                profile_name = lof.getAssignments("Geometric")[0].getAttribute().getName()
+                profile_name = (
+                    lof.getAssignments("Geometric")[0].getAttribute().getName()
+                )
                 ladder_beam_profiles.add(profile_name)
-            
+
         if not set.intersection(ladder_beam_profiles, main_span_profiles):
             if len(main_span_profiles) != 1:
                 raise ValueError("too many main spans")
             main_prof = tuple(main_span_profiles)[0]
-            main_span_height = self.database.getAttribute("Geometric", main_prof).getValue("D")
+            main_span_height = self.database.getAttribute(
+                "Geometric", main_prof
+            ).getValue("D")
             for prof in tuple(ladder_beam_profiles):
                 attr = self.database.createGeometricLine(prof)
-                
+
                 attr.setValue("elementType", "3D Thick Beam")
                 attr.setFromLibrary("Utilities", "", prof[5:], 0, 0, 0)
                 attr.setEccentricityOrigin("Centroid", "Fibre", "", "I3")
                 ladder_height = attr.getValue("D")
-                attr.setValue("ez0", -(main_span_height-ladder_height), 0)
+                attr.setValue("ez0", -(main_span_height - ladder_height), 0)
                 attr.setAnalysisCategory("3D")
 
 
@@ -1084,7 +1109,7 @@ class LatticeTower(LUSASSession):
             2) For the horizontal bracing, we need to make the line go
                 clockwise (in plan view)
             3) Create 4 local coordinate items for each leg rotation.
-    
+
         """
         # Used to determine the centre of the structure, upon which the
         # rotation of the horizontal elements is tested against.
@@ -1094,8 +1119,8 @@ class LatticeTower(LUSASSession):
             for coord in element.coords:
                 x_max, y_max = max(x_max, coord[0]), max(y_max, coord[1])
                 x_min, y_min = min(x_min, coord[0]), min(y_min, coord[1])
-        centre = ((x_max-x_min)/2, (y_max-y_min)/2, 0)
-        
+        centre = ((x_max - x_min) / 2, (y_max - y_min) / 2, 0)
+
         lines_to_be_reversed = []
         for line in self.selection.add("Line", "All").getObjects("Line", "All"):
             start_point = line.getStartPoint()
@@ -1103,76 +1128,74 @@ class LatticeTower(LUSASSession):
             p1, p2 = start_point.getXYZ(), end_point.getXYZ()
             if p2[2] - p1[2] < 0:  # 1) Orient Lines Upwards
                 lines_to_be_reversed.append(line.getID())
-            
+
             elif abs(p2[2] - p1[2]) < 1e-6:  # 2) Make horizontal clockwise
                 if is_clockwise_about(p1, p2, centre):
                     lines_to_be_reversed.append(line.getID())
-        
+
         # Perform reversal
         self.geom.setAllDefaults()
         self.geom.cycleReverse(True)
         self.geom.cycleReset(False)
         self.selection.remove("All")
-        
+
         self.selection.add("Line", lines_to_be_reversed)
         self.selection.reverse(self.geom)
         self.selection.remove("All")
-        
-        rotation_map = {
-            1: 180,
-            2: 90,
-            3: 0,
-            4: 270
-        }
-        
+
+        rotation_map = {1: 180, 2: 90, 3: 0, 4: 270}
+
         legs = defaultdict(list)
         for key in self.ie_table:
             if key.startswith("leg-"):
                 parts = key.split("-")
                 if len(parts) == 3:
                     legs[parts[2]].append(key)
-        
+
         origin = (0, 0, 0)
         for i in range(1, 5):
             lines_to_rotate = []
             rotat = rotation_map[i]
             for leg_name in legs[str(i)]:
                 lines_to_rotate.append(self.ie_table[leg_name].lusas_identifier[1])
-            attr = self.database.createLocalCartesianXYAttr(f"Rotation_{rotat}", rotat, origin).setAxesType("Cartesian")
+            attr = self.database.createLocalCartesianXYAttr(
+                f"Rotation_{rotat}", rotat, origin
+            ).setAxesType("Cartesian")
             self.selection.add("Line", lines_to_rotate)
             self.assignment.setAllDefaults()
             self.assignment.setLoadset("Loadcase 1")
-            self.database.getAttribute("Local Coordinates", f"Rotation_{rotat}").assignTo(self.selection, self.assignment)
+            self.database.getAttribute(
+                "Local Coordinates", f"Rotation_{rotat}"
+            ).assignTo(self.selection, self.assignment)
             self.selection.remove("All")
-    
+
         # Rotating each leg so corner faces outwards
-        rotation_map = {
-            1: 180,
-            2: 90,
-            3: 0,
-            4: 270
-        }
-        
+        rotation_map = {1: 180, 2: 90, 3: 0, 4: 270}
+
         legs = defaultdict(list)
         for key in self.ie_table:
             if key.startswith("leg-"):
                 parts = key.split("-")
                 if len(parts) == 3:
                     legs[parts[2]].append(key)
-        
+
         origin = (0, 0, 0)
         for i in range(1, 5):
             lines_to_rotate = []
             rotat = rotation_map[i]
             for leg_name in legs[str(i)]:
                 lines_to_rotate.append(self.ie_table[leg_name].lusas_identifier[1])
-            attr = self.database.createLocalCartesianXYAttr(f"Rotation_{rotat}", rotat, origin).setAxesType("Cartesian")
+            attr = self.database.createLocalCartesianXYAttr(
+                f"Rotation_{rotat}", rotat, origin
+            ).setAxesType("Cartesian")
             self.selection.add("Line", lines_to_rotate)
             self.assignment.setAllDefaults()
             self.assignment.setLoadset("Loadcase 1")
-            self.database.getAttribute("Local Coordinates", f"Rotation_{rotat}").assignTo(self.selection, self.assignment)
+            self.database.getAttribute(
+                "Local Coordinates", f"Rotation_{rotat}"
+            ).assignTo(self.selection, self.assignment)
             self.selection.remove("All")
-        
+
         # Setting the cross-section centroid as L2 (the corner of the L)
         for line_geom in self.database.getAttributes("Line Geometric"):
             line_geom.setEccentricityOrigin("Fibre", "Fibre", "L2", "L2")
@@ -1195,11 +1218,9 @@ class LatticeTower(LUSASSession):
 class Monopole(LUSASSession):
     def __init__(self, filename):
         super(Monopole, self).__init__(filename)
-        
+
     def subclass_specific_logic(self):
-        """
-    
-        """
+        """ """
         lines_to_be_reversed = []
         for line in self.selection.add("Line", "All").getObjects("Line", "All"):
             start_point = line.getStartPoint()
@@ -1207,13 +1228,13 @@ class Monopole(LUSASSession):
             p1, p2 = start_point.getXYZ(), end_point.getXYZ()
             if p2[2] - p1[2] < 0:  # 1) Orient Lines Upwards
                 lines_to_be_reversed.append(line.getID())
-        
+
         # Perform reversal
         self.geom.setAllDefaults()
         self.geom.cycleReverse(True)
         self.geom.cycleReset(False)
         self.selection.remove("All")
-        
+
         self.selection.add("Line", lines_to_be_reversed)
         self.selection.reverse(self.geom)
         self.selection.remove("All")
@@ -1223,7 +1244,7 @@ class Monopole(LUSASSession):
         All Mast loadcases are the same, so only creating one file, and apply
         this to all.
         """
-        
+
         loadcase_path = join(
             os.getcwd(), LUSASSession.LOADCASE_FOLDER, "mast_loading.lvb"
         )
