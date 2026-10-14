@@ -45,77 +45,73 @@ from model.ie_to_fe import order_coords, greedy_cyclic_sort
 from model.preprocess_ie import extract_profile_info, extract_ie_information
 
 
-def extract_structure_identifiers(filename):
+def extract_structure_identifiers(filename: str) -> tuple[int, int, int, int]:
     """
     Extract structure identifiers from a filename. The structure identifiers
     are later used for the LUSAS model name, and all the respective output
     data.
 
-    Filenames must contain a structured identifier in the form `a-b-c-d-e-f`,
+    Filenames must contain a structured identifier in the form `a-b-c-d`,
     where each component conveys specific metadata about the structure:
 
         a: Structure type
-           (e.g., 1 = bridge, 2 = mast, 3 = wind turbine)
-        b: Structure subclass
-           (type-specific; e.g., 1-1 = beam and slab bridge, 1-2 = ladder deck)
-        c: Dataset ID
-           (used to group files by test campaign, location, etc.)
-        d: State ID
-           (represents a structural state, e.g., damaged vs undamaged)
-        e: Structure instance ID
-           (a unique number for the instance of this subclass)
-        f: Variant ID (optional)
-           (used to track slight variations in configuration, materials, etc.)
+           (e.g., bridge, mast, windturbine)
+        b: Subclass type
+           (type-specific; e.g., bridge-1 = beam and slab bridge, bridge-2 = ladder deck bridge)
+        c: Population ID
+           (a unique number used to identify the population/configuration of the subclass)
+        d: Structure ID
+           (a unique number for the structure in the population)
 
-    The first five identifiers (a-e) are mandatory. If a sixth (variant ID) is
-    provided, it will be included in the output tuple; otherwise, a default
-    value should be handled elsewhere if needed.
+    All four of the identifiers (a-d) are mandatory.
 
     :param filename: The filename containing the structured identifier.
     :type filename: str
     :return: Tuple containing:
-        - structure_type (str)
-        - structure_subclass (str)
-        - dataset_id (str)
-        - state_id (str)
-        - structure_id (str)
-        - variant_id (str)
+        - structure_type (int)
+        - subclass_type (int)
+        - population_id (int)
+        - structure_id (int)
     :rtype: tuple
     :raises ValueError: If the filename does not contain all required
     identifiers.
     """
-    match = re.search(r"(\d+)-(\d+)-(\d+)-(\d+)-(\d+)?(-[a-zA-Z]*)?", filename)
+    match = re.search(
+        r"^({})-(\d+)-(\d+)-(\d+)$".format(
+            "|".join([STRUCTURE_CLASSES[key]["label"] for key in STRUCTURE_CLASSES])
+        ),
+        filename,
+    )
 
-    if match:
-        structure_type = match.group(1)
-        structure_subclass = match.group(2)
-        dataset_id = match.group(3)
-        state_id = match.group(4)
-        structure_id = match.group(5)
-        variant_id = match.group(6)
-
-    if (
-        structure_type
-        and structure_subclass
-        and dataset_id
-        and structure_id
-        and state_id
-    ):
-        return (
-            structure_type,
-            structure_subclass,
-            dataset_id,
-            state_id,
-            structure_id,
-            variant_id,
+    identifiers = (
+        (
+            next(
+                iter(
+                    [
+                        key
+                        for key in STRUCTURE_CLASSES
+                        if STRUCTURE_CLASSES[key]["label"] == match.group(1)
+                    ]
+                ),
+                0,
+            ),
+            int(match.group(2)),
+            int(match.group(3)),
+            int(match.group(4)),
         )
-    else:
+        if match
+        else (0, 0, 0, 0)
+    )
+
+    if not all(identifiers):
         raise ValueError(
-            "Filename must contain a structure identifier of the form a-b-c-d-e-f."
+            "Filename must contain a structure identifier of the form structure_type-subclass_id-population_id-structure_id."
         )
 
+    return identifiers
 
-def allocate_subclass(filename):
+
+def allocate_subclass(filename: str):
     """
     Allocate a subclass object based on the structure identifiers in the filename.
 
@@ -125,28 +121,15 @@ def allocate_subclass(filename):
     :rtype: Structure subclass instance
     :raises ValueError: If the structure type or subclass is invalid.
     """
-    structure_type, structure_subclass, _, _, _, _ = extract_structure_identifiers(
-        filename
-    )
-
-    # Define a dictionary mapping structure types to their corresponding
-    # subclasses
-    subclasses = {
-        "1": {  # Bridges
-            "1": BeamAndSlab,
-            "2": LadderDeck,
-        },
-        "2": {"1": LatticeTower, "2": Monopole},  # Masts
-        "3": {"1": WindTurbine},  # Wind Turbines
-    }
 
     # Check if the struct_type and struct_subclass exist in the dictionary
     try:
-        subclass_class = subclasses[structure_type][structure_subclass]
+        identifiers = extract_structure_identifiers(filename)
+        subclass_class = STRUCTURE_CLASSES[identifiers[0]]["subclasses"][identifiers[1]]
     except KeyError:
         raise ValueError(
-            f"Invalid structure type '{structure_type}' or subclass "
-            f"'{structure_subclass}' for filename '{filename}'"
+            f"Invalid structure type '{identifiers[0]}' or "
+            f"subclass '{identifiers[1]}' for {filename}"
         )
     # Instantiate the appropriate subclass with the filename
     return subclass_class(filename)
@@ -1255,6 +1238,18 @@ class Monopole(LUSASSession):
         self.loading_script_found = True
 
 
-class WindTurbine(LUSASSession):
+class HorizontalAxis(LUSASSession):
     def __init__(self):
         raise NotImplementedError("Wind Turbine not implemented.")
+
+
+class VerticalAxis(LUSASSession):
+    def __init__(self):
+        raise NotImplementedError("Wind Turbine not implemented.")
+
+
+STRUCTURE_CLASSES = {
+    1: {"label": "bridge", "subclasses": {1: BeamAndSlab, 2: LadderDeck}},
+    2: {"label": "mast", "subclasses": {1: LatticeTower, 2: Monopole}},
+    3: {"label": "windturbine", "subclasses": {1: HorizontalAxis, 2: VerticalAxis}},
+}
