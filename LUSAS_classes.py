@@ -35,6 +35,7 @@ import re
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from os.path import exists, join
+from typing import Any
 
 from win32com.client.dynamic import Dispatch
 
@@ -77,7 +78,7 @@ def extract_structure_identifiers(filename: str) -> tuple[int, int, int, int]:
     identifiers.
     """
     match = re.search(
-        r"^({})-(\d+)-(\d+)-(\d+)$".format(
+        r"^({})-(\d+)-(\d+)-(\d+)\.json$".format(
             "|".join([STRUCTURE_CLASSES[key]["label"] for key in STRUCTURE_CLASSES])
         ),
         filename,
@@ -186,12 +187,46 @@ class LUSASSession(ABC):
     is used.
     """
 
+    # lusas version
     VERSION = "21.1"
-    FE_FOLDER = "fe_models"  # Directory where the FE models will be saved.
-    IE_FOLDER = "ie_models"  # Directory from where the IE models are loaded.
-    LOADCASE_FOLDER = "loadcase_vba_scripts"
+    # folder locations
+    IE_FOLDER = join(os.getcwd(), "ie_models")
+    FE_FOLDER = join(os.getcwd(), "fe_models")
+    LOADCASE_FOLDER = join(os.getcwd(), "loadcases")
+    FEATURES_FOLDER = join(os.getcwd(), "features")
+    # parameters
+    FE_PARAMETERS = {
+        "verticalDirection": "Z",
+        "analysisCategory": "3D",
+        "modelUnits": "kN,m,t,s,C",
+        "useLineDistance": True,
+        "lineMeshSpacing": [2],
+        "lineMeshDistance": [0.5],
+        "surfaceMeshSpacing": [0, 0],
+        "volumeMeshSpacing": [2, 2, 2],
+        "nModalFeatures": 10,
+        "loadcaseFormat": r"^{structure_label}-{subclass_id}-{population_id}-{structure_id}\.lvb$",
+        "saveDisplacement": True,
+        "saveReaction": True,
+        "saveForceMomentBeam": True,
+        "saveForceMomentShell": True,
+        "saveLoading": True,
+        "saveModal": True,
+    }
 
-    def __init__(self, filename):
+    @classmethod
+    def set_fe_parameters(cls: object, parameters: dict[str, Any]) -> None:
+        for key in parameters:
+            if key in LUSASSession.FE_PARAMETERS:
+                LUSASSession.FE_PARAMETERS[key] = parameters[key]
+
+    @classmethod
+    def load_fe_parameters(cls: object, filename: str) -> None:
+        if exists(filename):
+            with open(filename, "r") as f:
+                LUSASSession.set_fe_parameters(json.load(f))
+
+    def __init__(self, filename: str):
         """
         Initialise a LUSAS session with the given IE path and project name.
         This class is used as a base class for all the structure subclasses,
@@ -203,52 +238,40 @@ class LUSASSession(ABC):
         be inherited from volumes.
         """
 
-        fe_params_path = join(os.getcwd(), "instance", "fe_run_params.json")
-        if exists(fe_params_path):
-            print("Loading from JSON")
-            with open(fe_params_path, "r") as f:
-                self.fe_params = json.load(f)
-        else:
-            self.fe_params = {
-                "verticalDirection": "Z",
-                "analysisCategory": "3D",
-                "modelUnits": "kN,m,t,s,C",
-                "useLineDistance": True,
-                "lineMeshSpacing": [2],
-                "lineMeshDistance": [0.5],
-                "surfaceMeshSpacing": [0, 0],
-                "volumeMeshSpacing": [2, 2, 2],
-                "nModalFeatures": 10,
-                "saveDisplacement": True,
-                "saveReaction": True,
-                "saveForceMomentBeam": True,
-                "saveForceMomentShell": True,
-                "saveLoading": True,
-                "saveModal": True,
-            }
+        # Ensure IE model exists
+        ie_path = join(LUSASSession.IE_FOLDER, filename)
+        if not exists(ie_path):
+            raise FileNotFoundError(f"The file {ie_path} does not exist.")
 
+        # Ensure all output directories exist
+        for dir in [LUSASSession.FE_FOLDER, LUSASSession.FEATURES_FOLDER]:
+            if not exists(dir):
+                os.mkdir(dir)
+
+        # Generate Identifiers
         self.structure_identifiers = extract_structure_identifiers(filename)
-        self.bridge_identifier = "-".join(self.structure_identifiers)
+        with open(ie_path, "r") as f:
+            ie_model = json.load(f)
+            self.model_name = ie_model["name"]
+            self.model_population = ie_model["population"]
 
         # Create a new LUSAS modeller instance, this boots up a LUSAS session.
         self.modeller = Dispatch("Lusas.Modeller." + LUSASSession.VERSION)
-
-        # Folder to save the FE models
-        if not exists(join(os.getcwd(), LUSASSession.FE_FOLDER)):
-            os.mkdir(join(os.getcwd(), LUSASSession.FE_FOLDER))
 
         # Create a new project inside the LUSAS session, defining the analysis
         # type and where to save the FE mode.
         self.database = self.modeller.newDatabase(
             "structural",
-            join(os.getcwd(), LUSASSession.FE_FOLDER, self.bridge_identifier),
+            join(LUSASSession.FE_FOLDER, self.model_name),
         )
 
         # Defining some traits of the model behaviour.
-        self.database.setModelTitle(self.bridge_identifier)
-        self.database.setVerticalDir(self.fe_params["verticalDirection"])
-        self.database.setAnalysisCategory(self.fe_params["analysisCategory"])
-        self.database.setModelUnits(self.fe_params["modelUnits"])
+        self.database.setModelTitle(self.model_name)
+        self.database.setVerticalDir(LUSASSession.FE_PARAMETERS["verticalDirection"])
+        self.database.setAnalysisCategory(
+            LUSASSession.FE_PARAMETERS["analysisCategory"]
+        )
+        self.database.setModelUnits(LUSASSession.FE_PARAMETERS["modelUnits"])
 
         # The following are used repeatedly to store different geometries and
         # assignments.
@@ -268,10 +291,6 @@ class LUSASSession(ABC):
         # Used as a flag to run the the simulation if a relevant loading script
         # is found.
         self.loading_script_found = False
-
-        ie_path = join(os.getcwd(), LUSASSession.IE_FOLDER, filename)
-        if not exists(ie_path):
-            raise FileNotFoundError(f"The file {ie_path} does not exist.")
 
         # Extracts all the information from a JSON IE model, and converts it
         # into a more handy table structure, which is used internally in
@@ -310,13 +329,15 @@ class LUSASSession(ABC):
         self.subclass_specific_logic()
 
         # Make basic meshes.
-        if self.fe_params["useLineDistance"]:
-            self.create_equal_line_mesh(*self.fe_params["lineMeshDistance"])
+        if LUSASSession.FE_PARAMETERS["useLineDistance"]:
+            self.create_equal_line_mesh(*LUSASSession.FE_PARAMETERS["lineMeshDistance"])
         else:
-            self.create_basic_line_mesh(*self.fe_params["lineMeshSpacing"])
+            self.create_basic_line_mesh(*LUSASSession.FE_PARAMETERS["lineMeshSpacing"])
 
-        self.create_basic_surface_mesh(*self.fe_params["surfaceMeshSpacing"])
-        self.create_basic_volume_mesh(*self.fe_params["volumeMeshSpacing"])
+        self.create_basic_surface_mesh(
+            *LUSASSession.FE_PARAMETERS["surfaceMeshSpacing"]
+        )
+        self.create_basic_volume_mesh(*LUSASSession.FE_PARAMETERS["volumeMeshSpacing"])
 
         # Assign the loadcases.
         self.assign_loadcase_from_lvb()
@@ -702,26 +723,27 @@ class LUSASSession(ABC):
         """
         Saves model results based on the analysis settings.
         """
-        filename = self.bridge_identifier
 
-        if self.fe_params["saveModal"]:
-            self.setup_modal_analysis(filename)
-            self.save_modal_data(filename)
+        if LUSASSession.FE_PARAMETERS["saveModal"]:
+            self.setup_modal_analysis()
+            self.save_modal_data()
 
         if not self.loading_script_found:
-            print(f"Cannot save results for {filename} as no loading script was found.")
+            print(
+                f"Cannot save results for {self.model_name} as no loading script was found."
+            )
             return
 
-        if self.fe_params["saveDisplacement"]:
-            self.save_displacement_data(filename)
-        if self.fe_params["saveReaction"]:
-            self.save_reaction_data(filename)
-        if self.fe_params["saveForceMomentBeam"]:
-            self.save_force_moment_beam_data(filename)
-        if self.fe_params["saveForceMomentShell"]:
-            self.save_force_moment_shell_data(filename)
-        if self.fe_params["saveLoading"]:
-            self.save_loading_data(filename)
+        if LUSASSession.FE_PARAMETERS["saveDisplacement"]:
+            self.save_displacement_data()
+        if LUSASSession.FE_PARAMETERS["saveReaction"]:
+            self.save_reaction_data()
+        if LUSASSession.FE_PARAMETERS["saveForceMomentBeam"]:
+            self.save_force_moment_beam_data()
+        if LUSASSession.FE_PARAMETERS["saveForceMomentShell"]:
+            self.save_force_moment_shell_data()
+        if LUSASSession.FE_PARAMETERS["saveLoading"]:
+            self.save_loading_data()
 
     def common_save_params(
         self, attr, set_results_type, set_analysis_results_type, loadcase_option
@@ -751,20 +773,20 @@ class LUSASSession(ABC):
         attr.setThreshold(None)
         attr.showResults(False)
 
-    def create_save_folder_and_save(self, filename, folder_name):
+    def create_save_folder_and_save(self, folder_name):
         """
         Creates a folder and saves the model data to a text file.
         """
-        folder_path = join(os.getcwd(), LUSASSession.FE_FOLDER, folder_name)
-        if not exists(folder_path):
-            os.mkdir(folder_path)
+        save_folder = join(LUSASSession.FEATURES_FOLDER, folder_name)
+        if not exists(save_folder):
+            os.mkdir(save_folder)
 
         self.modeller.getGridWindowByID(1).saveAllAs(
-            join(folder_path, f"{filename}.txt"), "Text"
+            join(save_folder, f"{self.model_name}.txt"), "Text"
         )
         self.modeller.getGridWindowByID(1).close()
 
-    def save_displacement_data(self, filename):
+    def save_displacement_data(self):
         """
         Save nodal displacement results to file.
         """
@@ -772,9 +794,9 @@ class LUSASSession(ABC):
         attr.setResultsEntity("Displacement")
         attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
         self.common_save_params(attr, "Components", None, "All")
-        self.create_save_folder_and_save(filename, "displacement_results")
+        self.create_save_folder_and_save("displacements")
 
-    def save_reaction_data(self, filename):
+    def save_reaction_data(self):
         """
         Save reaction force results to file.
         """
@@ -782,9 +804,9 @@ class LUSASSession(ABC):
         attr.setResultsEntity("Reaction")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
         self.common_save_params(attr, "Components", None, "All")
-        self.create_save_folder_and_save(filename, "reaction_results")
+        self.create_save_folder_and_save("reactions")
 
-    def save_force_moment_beam_data(self, filename):
+    def save_force_moment_beam_data(self):
         """
         Save beam force moment results to file.
         """
@@ -792,9 +814,9 @@ class LUSASSession(ABC):
         attr.setResultsEntity("Force/Moment - Thick 3D Beam")
         attr.setComponents(["Fx", "Fy", "Fz", "Mx", "My", "Mz"])
         self.common_save_params(attr, "Components", None, "All")
-        self.create_save_folder_and_save(filename, "force_moment_beam_results")
+        self.create_save_folder_and_save("force_moment_beams")
 
-    def save_force_moment_shell_data(self, filename):
+    def save_force_moment_shell_data(self):
         """
         Save shell force/moment results to file.
         """
@@ -802,9 +824,9 @@ class LUSASSession(ABC):
         attr.setResultsEntity("Force/Moment - Thick Shell")
         attr.setComponents(["Nx", "Ny", "Nxy", "Mx", "My", "Mxy", "Sx", "Sy"])
         self.common_save_params(attr, "Components", None, "All")
-        self.create_save_folder_and_save(filename, "force_moment_shell_results")
+        self.create_save_folder_and_save("force_moment_shells")
 
-    def save_loading_data(self, filename):
+    def save_loading_data(self):
         """
         Save applied loading results to file.
         """
@@ -812,9 +834,9 @@ class LUSASSession(ABC):
         attr.setResultsEntity("Loading")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
         self.common_save_params(attr, "Components", None, "All")
-        self.create_save_folder_and_save(filename, "loading_results")
+        self.create_save_folder_and_save("loadings")
 
-    def setup_modal_analysis(self, filename):
+    def setup_modal_analysis(self):
         """
         Configure and solve the modal analysis.
         """
@@ -860,7 +882,7 @@ class LUSASSession(ABC):
         attr.setResultsEntity("Loading")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
         self.common_save_params(attr, "Eigenvalues", ["Eigenvalues"], "All")
-        self.create_save_folder_and_save(filename, "frequencies")
+        self.create_save_folder_and_save("frequencies")
 
         # Handle Mode Shapes
         attr = self.database.createPrintResultsWizard("Mode_shapes")
@@ -869,7 +891,7 @@ class LUSASSession(ABC):
             if "Mode" in loadcase.getName():
                 loadcase_id = loadcase.getID()
                 break
-        n_modes = self.fe_params["nModalFeatures"]
+        n_modes = LUSASSession.FE_PARAMETERS["nModalFeatures"]
         lcIDs = [loadcase_id] * n_modes
         lcResFileIDs = [
             2
@@ -881,7 +903,7 @@ class LUSASSession(ABC):
         attr.setLoadcases(lcIDs, lcResFileIDs, lcEigenvalueIDs, lcHarmonicIDs)
         attr.setComponents(["DX", "DY", "DZ", "THX", "THY", "THZ", "RSLT"])
         self.common_save_params(attr, "Components", ["Eigenvalues"], "Selected")
-        self.create_save_folder_and_save(filename, "modalshapes")
+        self.create_save_folder_and_save("modal_shapes")
 
     def assign_gravity(self):
         """
@@ -910,16 +932,30 @@ class LUSASSession(ABC):
         Searches for the appropriate loading script and applies it to the model
         if a matching identifier is found.
         """
-        loadcase_path = join(os.getcwd(), LUSASSession.LOADCASE_FOLDER)
+        loadcase_path = join(LUSASSession.LOADCASE_FOLDER)
         if not exists(loadcase_path):
             return
 
+        loadcase_regex = re.compile(
+            self.FE_PARAMETERS["loadcaseFormat"].format(
+                structure_label=next(
+                    iter(
+                        [
+                            STRUCTURE_CLASSES[key]["label"]
+                            for key in STRUCTURE_CLASSES
+                            if key == self.structure_identifiers[0]
+                        ]
+                    ),
+                    "",
+                ),
+                subclass_id=self.structure_identifiers[1],
+                population_id=self.structure_identifiers[2],
+                structure_id=self.structure_identifiers[3],
+            )
+        )
         for filename in os.listdir(loadcase_path):
-            print("This is now different, check with Connor")
-            match = re.search(r"(\d+)-(\d+)-(\d+)", filename)
-            if not match:
-                continue
-            if match.group() == self.bridge_identifier:
+            match = loadcase_regex.fullmatch(filename)
+            if match:
                 self.modeller.fileOpen(join(loadcase_path, filename))
                 self.loading_script_found = True
                 break
@@ -928,9 +964,7 @@ class LUSASSession(ABC):
         """
         Saves the current model to the FE folder using the bridge identifier.
         """
-        self.database.saveAs(
-            join(os.getcwd(), LUSASSession.FE_FOLDER, self.bridge_identifier)
-        )
+        self.database.saveAs(join(LUSASSession.FE_FOLDER, self.model_name))
 
     def apply_surface_eccentricity(self):
         """
@@ -1183,20 +1217,6 @@ class LatticeTower(LUSASSession):
         for line_geom in self.database.getAttributes("Line Geometric"):
             line_geom.setEccentricityOrigin("Fibre", "Fibre", "L2", "L2")
 
-    def assign_loadcase_from_lvb(self):
-        """
-        All Mast loadcases are the same, so only creating one file, and apply
-        this to all.
-        """
-        loadcase_path = join(
-            os.getcwd(), LUSASSession.LOADCASE_FOLDER, "mast_loading.lvb"
-        )
-        if not exists(loadcase_path):
-            return
-
-        self.modeller.fileOpen(loadcase_path)
-        self.loading_script_found = True
-
 
 class Monopole(LUSASSession):
     def __init__(self, filename):
@@ -1221,21 +1241,6 @@ class Monopole(LUSASSession):
         self.selection.add("Line", lines_to_be_reversed)
         self.selection.reverse(self.geom)
         self.selection.remove("All")
-
-    def assign_loadcase_from_lvb(self):
-        """
-        All Mast loadcases are the same, so only creating one file, and apply
-        this to all.
-        """
-
-        loadcase_path = join(
-            os.getcwd(), LUSASSession.LOADCASE_FOLDER, "mast_loading.lvb"
-        )
-        if not exists(loadcase_path):
-            return
-
-        self.modeller.fileOpen(loadcase_path)
-        self.loading_script_found = True
 
 
 class HorizontalAxis(LUSASSession):
