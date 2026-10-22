@@ -77,13 +77,7 @@ def extract_structure_identifiers(filename: str) -> tuple[int, int, int, int]:
     :raises ValueError: If the filename does not contain all required
     identifiers.
     """
-    match = re.search(
-        r"^({})-(\d+)-(\d+)-(\d+)\.json$".format(
-            "|".join([STRUCTURE_CLASSES[key]["label"] for key in STRUCTURE_CLASSES])
-        ),
-        filename,
-    )
-
+    match = re.search(FILENAME_REGEX, filename)
     identifiers = (
         (
             next(
@@ -110,30 +104,6 @@ def extract_structure_identifiers(filename: str) -> tuple[int, int, int, int]:
         )
 
     return identifiers
-
-
-def allocate_subclass(filename: str):
-    """
-    Allocate a subclass object based on the structure identifiers in the filename.
-
-    :param filename: Filename containing the structured identifier.
-    :type filename: str
-    :return: Instance of a subclass representing the specific structure type.
-    :rtype: Structure subclass instance
-    :raises ValueError: If the structure type or subclass is invalid.
-    """
-
-    # Check if the struct_type and struct_subclass exist in the dictionary
-    try:
-        identifiers = extract_structure_identifiers(filename)
-        subclass_class = STRUCTURE_CLASSES[identifiers[0]]["subclasses"][identifiers[1]]
-    except KeyError:
-        raise ValueError(
-            f"Invalid structure type '{identifiers[0]}' or "
-            f"subclass '{identifiers[1]}' for {filename}"
-        )
-    # Instantiate the appropriate subclass with the filename
-    return subclass_class(filename)
 
 
 def is_clockwise_about(p1, p2, centre):
@@ -225,6 +195,30 @@ class LUSASSession(ABC):
         if exists(filename):
             with open(filename, "r") as f:
                 LUSASSession.set_fe_parameters(json.load(f))
+
+    @classmethod
+    def from_ie_model(cls, filename: str) -> "LUSASSession":
+        """
+        Allocate a subclass object based on the structure identifiers in the filename.
+
+        :param filename: Filename containing the structured identifier.
+        :type filename: str
+        :return: Instance of a subclass representing the specific structure type.
+        :rtype: Structure subclass instance
+        :raises ValueError: If the structure type or subclass is invalid.
+        """
+
+        # Check if the struct_type and struct_subclass exist in the dictionary
+        try:
+            id = extract_structure_identifiers(filename)
+            subclass_class = STRUCTURE_CLASSES[id[0]]["subclasses"][id[1]]
+        except KeyError:
+            raise ValueError(
+                f"Invalid structure type '{id[0]}' or "
+                f"subclass '{id[1]}' for {filename}"
+            )
+        # Instantiate the appropriate subclass with the filename
+        return subclass_class(filename)
 
     def __init__(self, filename: str):
         """
@@ -338,19 +332,6 @@ class LUSASSession(ABC):
             *LUSASSession.FE_PARAMETERS["surfaceMeshSpacing"]
         )
         self.create_basic_volume_mesh(*LUSASSession.FE_PARAMETERS["volumeMeshSpacing"])
-
-        # Assign the loadcases.
-        self.assign_loadcase_from_lvb()
-
-        # Save the results to txt.
-        self.save_results()
-
-        # These need modifying.................................................
-        # parsed_data = parse_loadcase_data(project_name)
-        # add_to_database(parsed_data)
-
-        self.save_model()
-        # self.modeller.quit()
 
     @abstractmethod
     def subclass_specific_logic(self):
@@ -723,17 +704,23 @@ class LUSASSession(ABC):
         """
         Saves model results based on the analysis settings.
         """
-
+        # If any of the save parameters are set, ensure a loadcase was attached
+        if (
+            any(
+                [
+                    LUSASSession.FE_PARAMETERS[key]
+                    for key in LUSASSession.FE_PARAMETERS
+                    if key.startswith("save")
+                ]
+            )
+            and not self.loading_script_found
+        ):
+            print(f"No results to save for {self.model_name} as no loadcase executed")
+            return
+        # Save data
         if LUSASSession.FE_PARAMETERS["saveModal"]:
             self.setup_modal_analysis()
             self.save_modal_data()
-
-        if not self.loading_script_found:
-            print(
-                f"Cannot save results for {self.model_name} as no loading script was found."
-            )
-            return
-
         if LUSASSession.FE_PARAMETERS["saveDisplacement"]:
             self.save_displacement_data()
         if LUSASSession.FE_PARAMETERS["saveReaction"]:
@@ -927,7 +914,7 @@ class LUSASSession(ABC):
         self.database.getAnalysis(f"Analysis {version}").solve(True)
         self.database.openAllResults(False)
 
-    def assign_loadcase_from_lvb(self):
+    def assign_loadcase(self):
         """
         Searches for the appropriate loading script and applies it to the model
         if a matching identifier is found.
@@ -1258,3 +1245,7 @@ STRUCTURE_CLASSES = {
     2: {"label": "mast", "subclasses": {1: LatticeTower, 2: Monopole}},
     3: {"label": "windturbine", "subclasses": {1: HorizontalAxis, 2: VerticalAxis}},
 }
+
+FILENAME_REGEX = r"^({})-(\d+)-(\d+)-(\d+)\.json$".format(
+    "|".join([STRUCTURE_CLASSES[key]["label"] for key in STRUCTURE_CLASSES])
+)
