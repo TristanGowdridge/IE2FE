@@ -183,6 +183,9 @@ class LUSASSession(ABC):
         "saveLoading": True,
         "saveModal": True,
     }
+    # logging
+    VERBOSE = False
+    LOGGER = staticmethod(print)
 
     @classmethod
     def set_fe_parameters(cls: object, parameters: dict[str, Any]) -> None:
@@ -220,6 +223,11 @@ class LUSASSession(ABC):
         # Instantiate the appropriate subclass with the filename
         return subclass_class(filename)
 
+    @classmethod
+    def print_diagnostics(cls, message: str):
+        if LUSASSession.VERBOSE:
+            LUSASSession.LOGGER(message)
+
     def __init__(self, filename: str):
         """
         Initialise a LUSAS session with the given IE path and project name.
@@ -233,6 +241,7 @@ class LUSASSession(ABC):
         """
 
         # Ensure IE model exists
+        LUSASSession.print_diagnostics(f"Loading IE Model from {filename}")
         ie_path = join(LUSASSession.IE_FOLDER, filename)
         if not exists(ie_path):
             raise FileNotFoundError(f"The file {ie_path} does not exist.")
@@ -248,8 +257,12 @@ class LUSASSession(ABC):
             ie_model = json.load(f)
             self.model_name = ie_model["name"]
             self.model_population = ie_model["population"]
+        LUSASSession.print_diagnostics(f"Loaded model {self.model_name}")
 
         # Create a new LUSAS modeller instance, this boots up a LUSAS session.
+        LUSASSession.print_diagnostics(
+            f"Creating modeller version {LUSASSession.VERSION}"
+        )
         self.modeller = Dispatch("Lusas.Modeller." + LUSASSession.VERSION)
 
         # Create a new project inside the LUSAS session, defining the analysis
@@ -269,6 +282,7 @@ class LUSASSession(ABC):
 
         # The following are used repeatedly to store different geometries and
         # assignments.
+        LUSASSession.print_diagnostics("Setting defaults")
         self.selection = self.modeller.getSelection()
         self.assignment = self.modeller.getSessionFileAssignment()
         self.assignment.setAllDefaults()
@@ -289,6 +303,7 @@ class LUSASSession(ABC):
         # Extracts all the information from a JSON IE model, and converts it
         # into a more handy table structure, which is used internally in
         # Python.
+        LUSASSession.print_diagnostics("Extracting IE information")
         self.ie_table = extract_ie_information(ie_path)
 
         # Orders by the geometry types to make use of geometric inheritance.
@@ -308,21 +323,30 @@ class LUSASSession(ABC):
             if info.ground_coord:
                 self.ground_elements.extend(info.ground_coord)
 
+        LUSASSession.print_diagnostics("Creating wireframe")
         self.create_wireframe()
 
         # From the wireframe, we now add specific information.
+        LUSASSession.print_diagnostics(
+            "Assigning materials, profiles, and ground elements"
+        )
         self.assign_materials()
         self.assign_profiles()
         self.assign_ground_elements()
 
         # Bridge model fine tuning
+        LUSASSession.print_diagnostics("Correcting geometry")
         self.apply_surface_eccentricity()
         self.correct_perimeter_line_direction_for_geometry()
 
         # Apply the model specific logic
+        LUSASSession.print_diagnostics("Applying any subclass logic")
         self.subclass_specific_logic()
 
         # Make basic meshes.
+        LUSASSession.print_diagnostics(
+            f"Creating the mesh: { 'equal' if LUSASSession.FE_PARAMETERS["useLineDistance"] else 'basic'}"
+        )
         if LUSASSession.FE_PARAMETERS["useLineDistance"]:
             self.create_equal_line_mesh(*LUSASSession.FE_PARAMETERS["lineMeshDistance"])
         else:
@@ -332,6 +356,9 @@ class LUSASSession(ABC):
             *LUSASSession.FE_PARAMETERS["surfaceMeshSpacing"]
         )
         self.create_basic_volume_mesh(*LUSASSession.FE_PARAMETERS["volumeMeshSpacing"])
+        LUSASSession.print_diagnostics(
+            f"Finished creating lusas model: {self.model_name}"
+        )
 
     @abstractmethod
     def subclass_specific_logic(self):
@@ -715,22 +742,31 @@ class LUSASSession(ABC):
             )
             and not self.loading_script_found
         ):
-            print(f"No results to save for {self.model_name} as no loadcase executed")
+            LUSASSession.print_diagnostics(
+                f"No results to save for {self.model_name} as no loadcase executed"
+            )
             return
         # Save data
         if LUSASSession.FE_PARAMETERS["saveModal"]:
+            LUSASSession.print_diagnostics("Saving modal analysis")
             self.setup_modal_analysis()
             self.save_modal_data()
         if LUSASSession.FE_PARAMETERS["saveDisplacement"]:
+            LUSASSession.print_diagnostics("Saving displacement")
             self.save_displacement_data()
         if LUSASSession.FE_PARAMETERS["saveReaction"]:
+            LUSASSession.print_diagnostics("Saving reaction")
             self.save_reaction_data()
         if LUSASSession.FE_PARAMETERS["saveForceMomentBeam"]:
+            LUSASSession.print_diagnostics("Saving force moment beam")
             self.save_force_moment_beam_data()
         if LUSASSession.FE_PARAMETERS["saveForceMomentShell"]:
+            LUSASSession.print_diagnostics("Saving force moment shell")
             self.save_force_moment_shell_data()
         if LUSASSession.FE_PARAMETERS["saveLoading"]:
+            LUSASSession.print_diagnostics("Saving loading")
             self.save_loading_data()
+        LUSASSession.print_diagnostics("Saving results complete")
 
     def common_save_params(
         self, attr, set_results_type, set_analysis_results_type, loadcase_option
@@ -923,6 +959,7 @@ class LUSASSession(ABC):
         if not exists(loadcase_path):
             return
 
+        LUSASSession.print_diagnostics("Searching for loadcase")
         loadcase_regex = re.compile(
             self.FE_PARAMETERS["loadcaseFormat"].format(
                 structure_label=next(
@@ -943,6 +980,7 @@ class LUSASSession(ABC):
         for filename in os.listdir(loadcase_path):
             match = loadcase_regex.fullmatch(filename)
             if match:
+                LUSASSession.print_diagnostics(f"Assigned loadcase {filename}")
                 self.modeller.fileOpen(join(loadcase_path, filename))
                 self.loading_script_found = True
                 break
@@ -952,6 +990,7 @@ class LUSASSession(ABC):
         Saves the current model to the FE folder using the bridge identifier.
         """
         self.database.saveAs(join(LUSASSession.FE_FOLDER, self.model_name))
+        LUSASSession.print_diagnostics(f"Saved model {self.model_name}")
 
     def apply_surface_eccentricity(self):
         """
