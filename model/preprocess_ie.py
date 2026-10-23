@@ -16,7 +16,7 @@ import os
 import warnings
 from os.path import exists, join
 
-from ie_to_fe import distance
+from model.ie_to_fe import distance
 
 GEOMETRY_TYPES = {"beam": "Line", "column": "Line", "slab": "Surface", "tower": "Line"}
 
