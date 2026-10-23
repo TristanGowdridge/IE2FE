@@ -896,7 +896,7 @@ class LUSASSession(ABC):
         self.database.getAnalysis("Modal_analysis").solve(True)
         self.database.openAllResults(True)
 
-    def save_modal_data(self, filename):
+    def save_modal_data(self):
         """
         Save modal frequencies and mode shapes.
         """
