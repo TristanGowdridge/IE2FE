@@ -17,7 +17,7 @@ read_directory = click.Path(
     resolve_path=True,
 )
 write_directory = click.Path(
-    exists=True,
+    exists=False,
     readable=True,
     writable=True,
     file_okay=False,
