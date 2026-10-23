@@ -156,6 +156,7 @@ def run(
     LUSASSession.FEATURES_FOLDER = feature_directory
     LUSASSession.VERBOSE = verbose
     LUSASSession.LOGGER = staticmethod(tqdm.write)
+    LUSASSession.set_fe_parameters(parameters)    
     for model in tqdm(ie_models, desc="IE Models"):
         session = LUSASSession.from_ie_model(model)
         session.assign_loadcase()
