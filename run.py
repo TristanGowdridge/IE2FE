@@ -90,6 +90,9 @@ flag_false = dict(required=False, is_flag=True, flag_value=False)
 @click.option("--surface-mesh-spacing", required=False, multiple=True, type=float)
 @click.option("--volume-mesh-spacing", required=False, multiple=True, type=float)
 @click.option("--n-modal-features", required=False, type=int)
+@click.option("--freq-threshold", required=False, type=float)
+@click.option("--mass-threshold", required=False, type=float)
+@click.option("--feature-groups", required=False, multiple=True, type=str)
 @click.option("--loadcase-format", required=False, type=str)
 @click.option("--save-displacement", "save_displacement", **flag_true)
 @click.option("--no-save-displacement", "save_displacement", **flag_false)
@@ -165,7 +168,7 @@ def run(
     LUSASSession.FEATURES_FOLDER = feature_directory
     LUSASSession.VERBOSE = verbose
     LUSASSession.LOGGER = staticmethod(tqdm.write)
-    LUSASSession.set_fe_parameters(parameters)    
+    LUSASSession.set_fe_parameters(parameters)
     for model in tqdm(ie_models, desc="IE Models"):
         session = LUSASSession.from_ie_model(model)
         session.assign_loadcase()
