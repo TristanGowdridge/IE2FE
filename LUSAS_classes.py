@@ -757,14 +757,6 @@ class LUSASSession(ABC):
             return
         # Save data
         feature_writer = FeatureWriter(self.model_name, self.model_population, 0, LUSASSession.FE_PARAMETERS)
-        if LUSASSession.FE_PARAMETERS["saveModal"]:
-            LUSASSession.print_diagnostics("Saving modal analysis")
-            self.setup_modal_analysis()
-            self.save_modal_data()
-            feature_writer.add_eigen_mode(
-                join(LUSASSession.RESULTS_FOLDER, "frequencies", f"{self.model_name}.txt"),
-                join(LUSASSession.RESULTS_FOLDER, "modal_shapes", f"{self.model_name}.txt")
-            )
         if LUSASSession.FE_PARAMETERS["saveDisplacement"]:
             LUSASSession.print_diagnostics("Saving displacement")
             self.save_displacement_data()
@@ -782,6 +774,14 @@ class LUSASSession(ABC):
         if LUSASSession.FE_PARAMETERS["saveLoading"]:
             LUSASSession.print_diagnostics("Saving loading")
             self.save_loading_data()
+        if LUSASSession.FE_PARAMETERS["saveModal"]:
+            LUSASSession.print_diagnostics("Saving modal analysis")
+            self.setup_modal_analysis()
+            self.save_modal_data()
+            feature_writer.add_eigen_mode(
+                join(LUSASSession.RESULTS_FOLDER, "frequencies", f"{self.model_name}.txt"),
+                join(LUSASSession.RESULTS_FOLDER, "modal_shapes", f"{self.model_name}.txt")
+            )
         feature_writer.write(LUSASSession.FEATURES_FOLDER)
         LUSASSession.print_diagnostics("Saving results complete")
 
