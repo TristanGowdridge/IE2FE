@@ -252,7 +252,11 @@ class LUSASSession(ABC):
             raise FileNotFoundError(f"The file {ie_path} does not exist.")
 
         # Ensure all output directories exist
-        for dir in [LUSASSession.FE_FOLDER, LUSASSession.FEATURES_FOLDER]:
+        for dir in [
+            LUSASSession.FE_FOLDER,
+            LUSASSession.RESULTS_FOLDER,
+            LUSASSession.FEATURES_FOLDER,
+        ]:
             if not exists(dir):
                 os.mkdir(dir)
 
