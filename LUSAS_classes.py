@@ -755,16 +755,22 @@ class LUSASSession(ABC):
                 f"No results to save for {self.model_name} as no loadcase executed"
             )
             return
+
         # Save data
-        feature_writer = FeatureWriter(self.model_name, self.model_population, 0, LUSASSession.FE_PARAMETERS)
+        def results_path(type: str) -> str:
+            return join(LUSASSession.RESULTS_FOLDER, type, f"{self.model_name}.txt")
+
+        feature_writer = FeatureWriter(
+            self.model_name, self.model_population, 0, LUSASSession.FE_PARAMETERS
+        )
         if LUSASSession.FE_PARAMETERS["saveDisplacement"]:
             LUSASSession.print_diagnostics("Saving displacement")
             self.save_displacement_data()
-            feature_writer.add_displacement(join(LUSASSession.RESULTS_FOLDER, "displacements", f"{self.model_name}.txt"))
+            feature_writer.add_displacement(results_path("displacements"))
         if LUSASSession.FE_PARAMETERS["saveReaction"]:
             LUSASSession.print_diagnostics("Saving reaction")
             self.save_reaction_data()
-            feature_writer.add_reaction(join(LUSASSession.RESULTS_FOLDER, "reactions", f"{self.model_name}.txt"))
+            feature_writer.add_reaction(results_path("reactions"))
         if LUSASSession.FE_PARAMETERS["saveForceMomentBeam"]:
             LUSASSession.print_diagnostics("Saving force moment beam")
             self.save_force_moment_beam_data()
@@ -779,8 +785,7 @@ class LUSASSession(ABC):
             self.setup_modal_analysis()
             self.save_modal_data()
             feature_writer.add_eigen_mode(
-                join(LUSASSession.RESULTS_FOLDER, "frequencies", f"{self.model_name}.txt"),
-                join(LUSASSession.RESULTS_FOLDER, "modal_shapes", f"{self.model_name}.txt")
+                results_path("frequencies"), results_path("modal_shapes")
             )
         feature_writer.write(LUSASSession.FEATURES_FOLDER)
         LUSASSession.print_diagnostics("Saving results complete")
