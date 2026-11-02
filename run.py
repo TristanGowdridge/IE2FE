@@ -52,6 +52,13 @@ flag_false = dict(required=False, is_flag=True, flag_value=False)
     type=read_directory,
 )
 @click.option(
+    "-r",
+    "--result-directory",
+    prompt="Directory to save generated results",
+    required=True,
+    type=write_directory,
+)
+@click.option(
     "-f",
     "--feature-directory",
     prompt="Directory to save processed features",
@@ -100,6 +107,7 @@ def run(
     ie_directory: str,
     fe_directory: str,
     loadcase_directory: str,
+    result_directory: str,
     feature_directory: str,
     parameters_file: str,
     verbose: bool,
@@ -112,7 +120,7 @@ def run(
         print(
             "Folder locations:"
             f"\n  IE: {ie_directory}\n  FE: {fe_directory}"
-            f"\n  Loadcase: {loadcase_directory}\n  Features: {feature_directory}"
+            f"\n  Loadcase: {loadcase_directory}\n Results: {result_directory}\n Features: {feature_directory}"
         )
 
     # find all IE models to process
@@ -153,6 +161,7 @@ def run(
     LUSASSession.IE_FOLDER = ie_directory
     LUSASSession.FE_FOLDER = fe_directory
     LUSASSession.LOADCASE_FOLDER = loadcase_directory
+    LUSASSession.RESULTS_FOLDER = result_directory
     LUSASSession.FEATURES_FOLDER = feature_directory
     LUSASSession.VERBOSE = verbose
     LUSASSession.LOGGER = staticmethod(tqdm.write)

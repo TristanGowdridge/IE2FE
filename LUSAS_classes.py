@@ -164,6 +164,7 @@ class LUSASSession(ABC):
     IE_FOLDER = join(os.getcwd(), "ie_models")
     FE_FOLDER = join(os.getcwd(), "fe_models")
     LOADCASE_FOLDER = join(os.getcwd(), "loadcases")
+    RESULTS_FOLDER = join(os.getcwd(), "results")
     FEATURES_FOLDER = join(os.getcwd(), "features")
     # parameters
     FE_PARAMETERS = {
@@ -757,17 +758,17 @@ class LUSASSession(ABC):
             self.setup_modal_analysis()
             self.save_modal_data()
             feature_writer.add_eigen_mode(
-                join(LUSASSession.FEATURES_FOLDER, "frequencies", f"{self.model_name}.txt"),
-                join(LUSASSession.FEATURES_FOLDER, "modal_shapes", f"{self.model_name}.txt")
+                join(LUSASSession.RESULTS_FOLDER, "frequencies", f"{self.model_name}.txt"),
+                join(LUSASSession.RESULTS_FOLDER, "modal_shapes", f"{self.model_name}.txt")
             )
         if LUSASSession.FE_PARAMETERS["saveDisplacement"]:
             LUSASSession.print_diagnostics("Saving displacement")
             self.save_displacement_data()
-            feature_writer.add_displacement(join(LUSASSession.FEATURES_FOLDER, "displacements", f"{self.model_name}.txt"))
+            feature_writer.add_displacement(join(LUSASSession.RESULTS_FOLDER, "displacements", f"{self.model_name}.txt"))
         if LUSASSession.FE_PARAMETERS["saveReaction"]:
             LUSASSession.print_diagnostics("Saving reaction")
             self.save_reaction_data()
-            feature_writer.add_reaction(join(LUSASSession.FEATURES_FOLDER, "reactions", f"{self.model_name}.txt"))
+            feature_writer.add_reaction(join(LUSASSession.RESULTS_FOLDER, "reactions", f"{self.model_name}.txt"))
         if LUSASSession.FE_PARAMETERS["saveForceMomentBeam"]:
             LUSASSession.print_diagnostics("Saving force moment beam")
             self.save_force_moment_beam_data()
@@ -812,7 +813,7 @@ class LUSASSession(ABC):
         """
         Creates a folder and saves the model data to a text file.
         """
-        save_folder = join(LUSASSession.FEATURES_FOLDER, folder_name)
+        save_folder = join(LUSASSession.RESULTS_FOLDER, folder_name)
         if not exists(save_folder):
             os.mkdir(save_folder)
 
