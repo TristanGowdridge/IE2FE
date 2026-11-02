@@ -895,7 +895,9 @@ class LUSASSession(ABC):
         self.database.options().setBoolean("Option 311", False, False, "Modal_analysis")
         self.database.options().setBoolean("Option 432", False, False, "Modal_analysis")
         loadcase = self.database.getLoadset("Loadcase 1", 0)
-        loadcase.setEigenvalueMaxMinControl("Frequency", "Minimum", 10)
+        loadcase.setEigenvalueMaxMinControl(
+            "Frequency", "Minimum", LUSASSession.FE_PARAMETERS["nModalFeatures"]
+        )
         loadcase.getEigenvalueControl().setValue("nivc", 0).setValue(
             "nitem", 30
         ).setValue("namast", 0).setValue("shift", 0.0)
