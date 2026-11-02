@@ -6,149 +6,12 @@ Created on Wed Jul  9 11:23:51 2025
 """
 
 import json
+import math
 import os
 import re
-import time
-from collections import defaultdict
+import warnings
 from datetime import datetime, timezone
-from itertools import accumulate
-from urllib.parse import quote_plus
-
-import pymongo
-
-
-def get_centre_span_locations(si_data):
-    """
-    Given some SI data, get a list of the centre span locations, this is where
-    the point loads have been applied.
-    """
-    si_params = si_data["models"]["structuralInformation"]["parameters"]
-    span_lengths = si_params["span"]["length"]["values"]
-    if isinstance(span_lengths, (int, float)):
-        span_lengths = [span_lengths]
-    bridge_width = (si_params["beams"]["quantity"] - 1) * si_params["beams"][
-        "center_to_center"
-    ]["value"]
-
-    x_temp = list(accumulate(span_lengths))
-    x_temp.insert(0, 0)
-
-    centre_span_locations = []
-    mid_y = bridge_width / 2
-
-    for i in range(len(span_lengths)):
-        mid_x = (x_temp[i] + x_temp[i + 1]) / 2
-        centre_span_locations.append((mid_x, mid_y, 0))
-
-    return centre_span_locations
-
-
-def parse_loadcases(folder, filename):
-    """
-    Loads in the output results file csv and parses it into a more pythonic
-    form.
-    """
-    filepath = os.path.join(folder, filename)
-    loadcases = defaultdict(list)
-    structure_name = filename.split("_")[0]
-    structure_name = structure_name.replace("bridge-1-1", "bridge-1-1-1-0")
-    loadcases["metadata"] = {"structure_name": structure_name}
-
-    current_case = None
-    recording = False
-    in_header = True
-
-    if "displacement" in filepath.lower():
-        loadcases["metadata"]["data_type"] = "displacement"
-    elif "reaction" in filepath.lower():
-        loadcases["metadata"]["data_type"] = "reaction"
-    else:
-        raise ValueError("Unsupported data type.")
-
-    with open(filepath, "r", encoding="utf-8") as file:
-        meta_data_retreived = 0
-        for line in file:
-            stripped = line.strip()
-            if in_header:
-                if "Created" in stripped:
-                    dt = datetime.strptime(stripped.split("\t")[-1], "%d/%m/%y %H:%M")
-                    dt = dt.replace(tzinfo=timezone.utc)
-                    timestamp_seconds = dt.timestamp()
-                    timestamp_nanoseconds = int(timestamp_seconds * 1e9)
-                    loadcases["metadata"]["timestamps"] = {
-                        "generated": timestamp_nanoseconds,
-                        "stored": time.time_ns(),
-                    }
-                    meta_data_retreived += 1
-
-                elif "Model title" in stripped:
-                    loadcases["metadata"]["title"] = stripped.split("\t")[-1]
-                    meta_data_retreived += 1
-
-                if meta_data_retreived == 2:
-                    in_header = False
-                continue
-
-            match_reg = re.match(r"^(\d+):([A-Za-z0-9_]+)", stripped)
-
-            if not stripped:
-                continue
-
-            if match_reg:
-                if stripped.endswith("(Summary)"):
-                    recording = False
-                    continue
-                next(file)  # Skip the blank line
-                current_case = (match_reg.group(1), match_reg.group(2))
-                headings = next(file).strip().split("\t")
-                headings.insert(0, "Line Number")
-                loadcases[current_case].append(headings)
-                recording = True
-                continue
-
-            if recording:
-                data = stripped.split("\t")
-                loadcases[current_case].append(data)
-
-    # Now loop over the extracted data, trim for only the relevant data, and
-    # format
-    for key, value in loadcases.items():
-        if key == "metadata":
-            loadcases["metadata"]["units"] = {}
-            continue
-
-        if len(value[0]) == 9:
-            raise NotImplementedError("Need to implement for old case")
-        elif len(value[0]) == 12:
-            slice_obj = slice(2, 8, 1)
-        else:
-            raise NotImplementedError()
-        if loadcases["metadata"]["data_type"] == "reaction":
-            # To remove the sum row.
-            del value[-1]
-
-        for i in range(len(value)):
-            temp = value[i][slice_obj]
-            if i == 0:
-                units = []
-                clean_labels = []
-
-                for label in temp:
-                    match = re.search(r"\[(.*?)\]", label)
-                    if match:
-                        units.append(match.group(1))  # Get the unit inside []
-                        clean_labels.append(re.sub(r"\[.*?\]", "", label))
-                    else:
-                        units.append(None)  # No unit present
-                        clean_labels.append(label)
-
-                value[i] = clean_labels
-                loadcases["metadata"]["units"][key] = units
-                continue
-
-            value[i] = [cast_str_to_num(val) for val in temp]
-
-    return loadcases
+from typing import Any
 
 
 def cast_str_to_num(val):
@@ -156,386 +19,545 @@ def cast_str_to_num(val):
     Handy function used for casting the results entries from strings to ints or
     floats
     """
-    if "." in val or "e" in val or "E" in val:
-        return float(val)
-    else:
-        return int(val)
+    return float(val) if "." in val or "e" in val or "E" in val else int(val)
 
 
-def reform_into_feature_schema(loadcases, save_mongo=True, save_csv=False):
-    """ """
-    params_path = os.path.join(os.getcwd(), "instance", "fe_run_params.json")
-    if not os.path.exists(params_path):
-        raise FileNotFoundError()
+def create_schema_document(
+    model_name: str,
+    population_name: str,
+    health_state: int,
+    timestamp: int,
+    parameters: dict,
+) -> dict:
+    """Create empty schema document
 
-    with open(params_path) as f:
-        fe_params = json.load(f)
+    Args:
+        model_name (str): model name e.g bridge-1-1-1
+        population_name (str): population name e.g pear-bridge-beam-and-slab-1
+        health_state (int): numerical health state of features e.g 0
+        timestamp (int): nanoseconds since epoch
+        parameters (dict): parameters used to generate the features
 
-    type_root = "spatial"
-    type_header = {
-        "name": type_root,
-        "type": {"name": loadcases["metadata"]["data_type"]},
+    Returns:
+        dict: PBSHM Schema document
+    """
+    return {
+        "version": "1.4.1",
+        "name": model_name,
+        "population": population_name,
+        "health": {"state": health_state},
+        "source": {
+            "timestamp": {"generated": timestamp, "stored": timestamp},
+            "selection": [{"name": model_name}],
+            "software": [
+                {
+                    "name": "IE2FE",
+                    "version": "v1.0",
+                    "source": "https://github.com/tristanGowdridge/IE2FE",
+                    "parameters": parameters,
+                }
+            ],
+            "environment": {
+                "dataset": {
+                    "description": "the dataset the model was taken from",
+                    "value": "pear",
+                }
+            },
+        },
+        "features": [],
     }
 
-    si_folder = os.path.join(os.getcwd(), "si-models")
-    filename = f"{loadcases['metadata']['structure_name']}.json"
-    file_path = os.path.join(si_folder, filename)
 
-    if os.path.isfile(file_path):
-        with open(file_path, "r") as f_si:
-            si_data = json.load(f_si)
-    else:
-        raise FileNotFoundError
+def create_spatial_feature(
+    scenario_name: str,
+    type: str,
+    x_pos: list[float],
+    y_pos: list[float],
+    z_pos: list[float],
+    x_val: list[float],
+    y_val: list[float],
+    z_val: list[float],
+) -> dict:
+    """Create spatial feature
 
-    for key, value in loadcases.items():
-        if "DeadLoad" in key[1]:
-            variant_id = "static"
-            scenario_id = (
-                "1" if loadcases["metadata"]["data_type"] == "displacement" else "2"
-            )
-            feature_name = f"spatial-{loadcases['metadata']['data_type']}-whole-structure-dead-load"
-            environment = {
-                "load": {
-                    "description": "Structure is loaded under own weight in z axis in m/s^2",
-                    "value": 9.81,
+    Args:
+        scenario_name (str): scenario name e.g deadload
+        type (str): spatial type e.g displacement
+        x_pos (list[float]): list of values for x positions
+        y_pos (list[float]): list of values for y positions
+        z_pos (list[float]): list of values for z positions
+        x_val (list[float]): list of values for x values
+        y_val (list[float]): list of values for y values
+        z_val (list[float]): list of values for z values
+
+    Raises:
+        Exception: invalid lengths
+
+    Returns:
+        dict: PBSHM feature dictionary
+    """
+    # check equal lengths
+    if not (
+        len(x_pos) == len(y_pos) == len(z_pos) == len(x_val) == len(y_val) == len(z_val)
+    ):
+        raise Exception("X,Y,Z values do not have equal lengths")
+
+    return {
+        "name": scenario_name,
+        "type": {"name": "spatial", "type": {"name": type}},
+        "variant": "static",
+        "coordinates": {
+            "global": {
+                "translational": {
+                    "unit": "m",
+                    "x": {"indices": {"start": 0, "end": len(x_pos)}, "vector": x_pos},
+                    "y": {"indices": {"start": 0, "end": len(y_pos)}, "vector": y_pos},
+                    "z": {"indices": {"start": 0, "end": len(z_pos)}, "vector": z_pos},
                 }
             }
-        elif "Span" in key[1]:
+        },
+        "values": {
+            "unit": "m",
+            "x": {"indices": {"start": 0, "end": len(x_val)}, "vector": x_val},
+            "y": {"indices": {"start": 0, "end": len(y_val)}, "vector": y_val},
+            "z": {"indices": {"start": 0, "end": len(z_val)}, "vector": z_val},
+        },
+    }
 
-            centre_span_locations = get_centre_span_locations(si_data)
-            span_id = re.search(r"Span(\d+)_", key[1]).group(1)
-            variant_id = "static"
-            scenario_id = "3"
-            feature_name = f"spatial-{loadcases['metadata']['data_type']}-whole-structure-{span_id}-midspan-point-load"
-            loc = centre_span_locations[int(span_id) - 1]
-            environment = {
-                "loadValue": {
-                    "description": f"Point load at midspan of span {span_id} in -z axis in kN",
-                    "value": 400,
-                },
-                "loadLocationX": {
-                    "description": "X coordinates of load position in meters",
-                    "value": loc[0],
-                },
-                "loadLocationY": {
-                    "description": "Y coordinates of load position in meters",
-                    "value": loc[1],
-                },
-                "loadLocationZ": {
-                    "description": "Z coordinates of load position in meters",
-                    "value": loc[2],
-                },
-            }
-        else:
-            continue
-        parts = loadcases["metadata"]["structure_name"].split("-")
-        parts.insert(-1, scenario_id)
-        structure_name_filename = "-".join(parts)
 
-        # Handle the features section
-        transposed = list(zip(*value))
-        features = {
-            "name": feature_name,
-            "type": type_header,
-            "variant": variant_id,
+def create_eigen_mode_feature(
+    scenario_name: str,
+    variation: str,
+    natural_frequency: float,
+    x_pos: list[float],
+    y_pos: list[float],
+    z_pos: list[float],
+    x_val: list[float],
+    y_val: list[float],
+    z_val: list[float],
+) -> dict:
+    """Create eigen mode feature
+
+    Args:
+        scenario_name (str): scenario name e.g deadload
+        variation (str): eigen mode variation e.g acceleration
+        natural_frequency (float): natural frequency
+        x_pos (list[float]): list of values for x positions
+        y_pos (list[float]): list of values for y positions
+        z_pos (list[float]): list of values for z positions
+        x_val (list[float]): list of values for x values
+        y_val (list[float]): list of values for y values
+        z_val (list[float]): list of values for z values
+
+    Raises:
+        Exception: invalid lengths
+
+    Returns:
+        dict: PBSHM feature dictionary
+    """
+    # check equal lengths
+    if not (
+        len(x_pos) == len(y_pos) == len(z_pos) == len(x_val) == len(y_val) == len(z_val)
+    ):
+        raise Exception("X,Y,Z values do not have equal lengths")
+
+    return {
+        "name": scenario_name,
+        "type": "eigenMode",
+        "variant": {"name": variation},
+        "naturalFrequency": {"unit": "Hz", "value": natural_frequency},
+        "modeShape": {
             "coordinates": {
                 "global": {
                     "translational": {
-                        axis: {
-                            "indices": {"start": 0, "end": len(coord_row) - 1},
-                            "vector": list(coord_row[1:]),
-                        }
-                        for coord_row, axis in zip(transposed[:3], ("x", "y", "z"))
+                        "unit": "m",
+                        "x": {
+                            "indices": {"start": 0, "end": len(x_pos)},
+                            "vector": x_pos,
+                        },
+                        "y": {
+                            "indices": {"start": 0, "end": len(y_pos)},
+                            "vector": y_pos,
+                        },
+                        "z": {
+                            "indices": {"start": 0, "end": len(z_pos)},
+                            "vector": z_pos,
+                        },
                     }
                 }
             },
             "values": {
-                axis: {
-                    "indices": {"start": 0, "end": len(value_row) - 1},
-                    "vector": list(value_row[1:]),
-                }
-                for value_row, axis in zip(transposed[3:], ("x", "y", "z"))
+                "unit": "m",
+                "x": {"indices": {"start": 0, "end": len(x_val)}, "vector": x_val},
+                "y": {"indices": {"start": 0, "end": len(y_val)}, "vector": y_val},
+                "z": {"indices": {"start": 0, "end": len(z_val)}, "vector": z_val},
             },
-        }
-        features["coordinates"]["global"]["translational"]["unit"] = "m"
-        features["values"]["unit"] = loadcases["metadata"]["units"][key][-1]
+        },
+    }
 
-        # Create the output JSON
-        json_file = {
-            "version": "1.3.1",
-            "name": structure_name_filename,
-            "population": si_data["population"],
-            "source": {
-                "timestamp": loadcases["metadata"]["timestamps"],
-                "selection": [{"name": loadcases["metadata"]["structure_name"]}],
-                "software": [
+
+def process_results(
+    filename: str,
+) -> tuple[str, int, list[int, int, str, list[str], list[list[Any]]]]:
+    """process results into tuple
+
+    Args:
+        filename (str): results filename
+
+    Returns:
+        tuple[str, int, list[int, int, str, list[str], list[list[Any]]]]: results object
+    """
+    # headers
+    header_regex = [
+        (re.compile(r"^[0-9]+\tModel title\t([a-zA-Z0-9-]+)$"), 1),
+        (
+            re.compile(r"^[0-9]+\tDate\t([0-9]{1,2})/([0-9]{1,2})/([0-9]{1,2})$"),
+            (1, 2, 3),
+        ),
+        (re.compile(r"^[0-9]+\tTime\t([0-9]{1,2}):([0-9]{1,2})$"), (1, 2)),
+    ]
+    header_values = [None for _ in header_regex]
+
+    # read file line by line
+    sections = []
+    section_re = re.compile(r"^([0-9]+):([)(_ .=a-zA-Z0-9+-]+)$")
+    number_re = re.compile(r"^-?[0-9]+(\.[0-9]+(E[+-]?[0-9]+)?)?$")
+    with open(filename, "r") as fs:
+        index = 0
+        for line in fs:
+
+            # ignore empty lines
+            contents = line.strip()
+            if len(contents) == 0:
+                continue
+
+            # process file header info
+            if len(sections) == 0:
+                for h_index, regex in enumerate(header_regex):
+                    if header_values[h_index] == None:
+                        re_match = regex[0].fullmatch(contents)
+                        if re_match:
+                            header_values[h_index] = (
+                                re_match.group(*regex[1])
+                                if isinstance(regex[1], tuple)
+                                else re_match.group(regex[1])
+                            )
+
+            # process start of sections
+            section_match = section_re.fullmatch(contents)
+            if section_match:
+                if len(sections) > 0:
+                    sections[-1]["end"] = index - 1
+                sections.append(
                     {
-                        "name": "IE2FE",
-                        "version": "0.1",
-                        "source": "https://github.com/TristanGowdridge/IE2FE",
-                        "parameters": fe_params,
+                        "start": index,
+                        "end": None,
+                        "name": section_match.group(2),
+                        "headers": [],
+                        "values": [],
                     }
-                ],
-                "environment": environment,
-            },
-            "features": [features],
-        }
+                )
 
-        if save_csv:
-            save_name = structure_name_filename + "-" + feature_name + ".json"
-            save_folder = os.path.join(os.getcwd(), "parsed_feature_data")
-            if not os.path.isdir(save_folder):
-                os.mkdir(save_folder)
-            save_path = os.path.join(save_folder, save_name)
-            with open(save_path, "w") as f:
-                json.dump(json_file, f, indent=4)
+            # process section headers
+            elif len(sections) > 0 and index - 1 == sections[-1]["start"]:
+                sections[-1]["headers"] = contents.split("\t")
 
-        if save_mongo:
-            collection_obj = db_get_collection()
-            collection_obj.insert_one(json_file)
+            # process section values
+            elif len(sections) > 0:
+                values = contents.split("\t")
+                sections[-1]["values"].append(
+                    [
+                        (
+                            cast_str_to_num(value)
+                            if number_re.fullmatch(value)
+                            else value
+                        )
+                        for value in values[1:]
+                    ]
+                )
+
+            # only increment index on valid lines
+            index += 1
+
+        # close of final section
+        if len(sections) > 0:
+            sections[-1]["end"] = index
+
+    # convert date time object
+    timestamp = 0
+    if len(header_values[1]) == 3 and len(header_values[2]) == 2:
+        dt = datetime(
+            int(header_values[1][2]) + 2000,  # year, month, day
+            int(header_values[1][1]),
+            int(header_values[1][0]),
+            int(header_values[2][0]),  # hours, minites
+            int(header_values[2][1]),
+        )
+        dt = dt.replace(tzinfo=timezone.utc)
+        timestamp = int(dt.timestamp() * 1e9)
+
+    # return data
+    return (header_values[0], timestamp, sections)
 
 
-def db_get_collection():
-    """
-    Returns a connection to the MongoDB collection.
-    """
-    credentials_path = os.path.join(
-        os.getcwd(), "instance", "database_credentials.json"
-    )
-    if os.path.isfile(credentials_path):
-        with open(credentials_path, "r") as f_cred:
-            config = json.load(f_cred)
+class FeatureWriter:
 
-    mongodb_uri = "mongodb://"
-    mongodb_uri += f"{quote_plus(config['authentication']['username'])}:"
-    mongodb_uri += f"{quote_plus(config['authentication']['password'])}@"
-    mongodb_uri += f"{config['hostname']}:{config['port']}/"
-    mongodb_uri += f"{config['authentication']['database']}"
-    return pymongo.MongoClient(mongodb_uri)[config["database"]][config["collection"]]
+    def __init__(
+        self,
+        model_name: str,
+        population_name: str,
+        health_state: int,
+        parameters: dict,
+        scenarios: list[str] = [],
+    ) -> "FeatureWriter":
+        """create new feature writer to convert fe results into PBSHM features
 
+        Args:
+            model_name (str): model name
+            population_name (str): population name
+            health_state (int): document health state
+            parameters (dict): parameters dictionary
+            scenarios (list[str], optional): scenario filter. Defaults to [].
 
-def parse_eigenmode(folder, filename):
-    """
-    This is largely the same as above, can definitely break down into
-    functions. The only real difference is the different regex to extract the
-    frequency?
-    """
-    if "frequencies" in filename:
-        # All the info that is in the frequencies is also in the mode shape?
-        # I've left this in if needs to be generalised/ expanded at a later
-        # stage.
-        return None
-    elif "modeshapes" in filename:
-        freq_filename = filename.replace("modeshapes", "frequencies")
-        mode_filename = filename
-        pass
-    else:
-        raise FileNotFoundError
+        Returns:
+            FeatureWriter: _description_
+        """
+        self.model_name = model_name
+        self.population_name = population_name
+        self.health_state = health_state
+        self.parameters = parameters
+        self.scenarios = scenarios
+        self.features = []
+        self.timestamps = []
 
-    mode_filepath = os.path.join(folder, mode_filename)
+    def add_displacement(self, filename: str) -> None:
+        """add displacement data to features to be written
 
-    modeshapes = defaultdict(list)
-    structure_name = filename.split("_")[0]
-    structure_name = structure_name.replace("bridge-1-1", "bridge-1-1-1-0")
-    modeshapes["metadata"] = {"structure_name": structure_name}
-    modeshapes["metadata"]["data_type"] = "eigenMode"
-
-    current_case = None
-    recording = False
-    in_header = True
-
-    with open(mode_filepath, "r") as file:
-        meta_data_retreived = 0
-        for line in file:
-            stripped = line.strip()
-            if in_header:
-                if "Created" in stripped:
-                    dt = datetime.strptime(stripped.split("\t")[-1], "%d/%m/%y %H:%M")
-                    dt = dt.replace(tzinfo=timezone.utc)
-                    timestamp_seconds = dt.timestamp()
-                    timestamp_nanoseconds = int(timestamp_seconds * 1e9)
-                    modeshapes["metadata"]["timestamps"] = {
-                        "generated": timestamp_nanoseconds,
-                        "stored": time.time_ns(),
-                    }
-                    meta_data_retreived += 1
-
-                elif "Model title" in stripped:
-                    modeshapes["metadata"]["title"] = stripped.split("\t")[-1]
-                    meta_data_retreived += 1
-
-                if meta_data_retreived == 2:
-                    in_header = False
-                continue
-
-            if not stripped:
-                continue
-
-            match_reg = re.match(
-                r"^(\d+):Mode\s+(\d+)\s+Frequency\s+=\s+([\d\.]+)", stripped
+        Args:
+            filename (str): filename for data to be read from
+        """
+        results = process_results(filename)
+        if results[0] != self.model_name:
+            warnings.warn(
+                f"Displacement file model conflict {self.model_name}:{results[0]}"
             )
-            if match_reg:
-                if stripped.endswith("(Summary)"):
-                    recording = False
-                    continue
-                next(file)  # Skip the blank line
-                loadcase_num = match_reg.group(1)
-                mode_number = match_reg.group(2)
-                frequency = match_reg.group(3)
-                current_case = (loadcase_num, mode_number, frequency)
-                headings = next(file).strip().split("\t")
-                headings.insert(0, "Line Number")
-                modeshapes[current_case].append(headings)
-                recording = True
+        for segment in results[2]:
+            # exclude summary lines
+            if segment["name"].endswith("(Summary)"):
                 continue
-
-            if recording:
-                data = stripped.split("\t")
-                modeshapes[current_case].append(data)
-
-        # Now loop over the extracted data, trim for only the relevant data, and
-        # format
-        for key, value in modeshapes.items():
-            if key == "metadata":
-                modeshapes["metadata"]["units"] = {}
+            # exlucde scenarios not in filter
+            elif len(self.scenarios) > 0 and segment["name"] not in self.scenarios:
                 continue
+            x_pos, y_pos, z_pos = [], [], []
+            x_val, y_val, z_val = [], [], []
+            for line in segment["values"]:
+                x_pos.append(line[1])
+                y_pos.append(line[2])
+                z_pos.append(line[3])
+                x_val.append(line[4])
+                y_val.append(line[5])
+                z_val.append(line[6])
+            self.timestamps.append(results[1])
+            self.features.append(
+                create_spatial_feature(
+                    segment["name"].lower().replace("_", "-"),
+                    "displacement",
+                    x_pos,
+                    y_pos,
+                    z_pos,
+                    x_val,
+                    y_val,
+                    z_val,
+                )
+            )
 
-            if len(value[0]) == 9:
-                raise NotImplementedError("Need to implement for old case")
-            elif len(value[0]) == 12:
-                slice_obj = slice(2, 8, 1)
-            else:
-                raise NotImplementedError()
+    def add_reaction(self, filename: str) -> None:
+        """add reaction data to features to be written
 
-            for i in range(len(value)):
-                temp = value[i][slice_obj]
-                if i == 0:
-                    units = []
-                    clean_labels = []
-
-                    for label in temp:
-                        match = re.search(r"\[(.*?)\]", label)
-                        if match:
-                            units.append(match.group(1))  # Get the unit inside []
-                            clean_labels.append(re.sub(r"\[.*?\]", "", label))
-                        else:
-                            units.append(None)  # No unit present
-                            clean_labels.append(label)
-
-                    value[i] = clean_labels
-                    modeshapes["metadata"]["units"][key] = units
+        Args:
+            filename (str): filename for data to be read from
+        """
+        results = process_results(filename)
+        if results[0] != self.model_name:
+            warnings.warn(
+                f"Reaction file model conflict {self.model_name}:{results[0]}"
+            )
+        for segment in results[2]:
+            # exclude summary lines
+            if segment["name"].endswith("(Summary)"):
+                continue
+            # exlucde scenarios not in filter
+            elif len(self.scenarios) > 0 and segment["name"] not in self.scenarios:
+                continue
+            x_pos, y_pos, z_pos = [], [], []
+            x_val, y_val, z_val = [], [], []
+            for line in segment["values"]:
+                # ignore total line
+                if line[0] == isinstance(line[0], str) and line[0].lower() == "total":
                     continue
+                # append data
+                x_pos.append(line[1])
+                y_pos.append(line[2])
+                z_pos.append(line[3])
+                x_val.append(line[4])
+                y_val.append(line[5])
+                z_val.append(line[6])
+            self.timestamps.append(results[1])
+            self.features.append(
+                create_spatial_feature(
+                    segment["name"].lower().replace("_", "-"),
+                    "reaction",
+                    x_pos,
+                    y_pos,
+                    z_pos,
+                    x_val,
+                    y_val,
+                    z_val,
+                )
+            )
 
-                value[i] = [cast_str_to_num(val) for val in temp]
+    def add_eigen_mode(
+        self, frequencies_filename: str, modeshape_filename: str
+    ) -> None:
+        # get frequency details
+        results = process_results(frequencies_filename)
+        if results[0] != self.model_name:
+            warnings.warn(
+                f"Frequency file model conflict {self.model_name}:{results[0]}"
+            )
+        frequencies = {}
+        for segment in results[2]:
+            if segment["name"].lower().endswith("(eigenvalues)"):
+                for line in segment["values"]:
+                    if line[0] in frequencies:
+                        frequencies[line[0]][0] = line[2]
+                    else:
+                        frequencies[line[0]] = [line[2], None]
+            elif segment["name"].lower().endswith("(mass participation factors)"):
+                for line in segment["values"]:
+                    max_value = max(
+                        [line[1], line[2], line[3], line[4], line[5], line[6]]
+                    )
+                    if line[0] in frequencies:
+                        frequencies[line[0]][1] = max_value
+                    else:
+                        frequencies[line[0]] = [None, max_value]
+        # process mode shapes
+        results = process_results(modeshape_filename)
+        if results[0] != self.model_name:
+            warnings.warn(
+                f"Modeshape file model conflict {self.model_name}:{results[0]}"
+            )
+        scenario_re = re.compile(
+            r"^[Mm]ode ([0-9]+) [Ff]requency = ([0-9]+(\.[0-9]+(E[+-]?[0-9]+)?)?)$"
+        )
+        for segment in results[2]:
+            # exclude any scenario names that don't match
+            scenario_match = scenario_re.fullmatch(segment["name"])
+            if not scenario_match:
+                continue
+            # ensure a mode is linked in the frequencies
+            mode_number = int(scenario_match.group(1))
+            if mode_number not in frequencies:
+                continue
+            # ensure the frequencies are close enough
+            if not math.isclose(
+                frequencies[mode_number][0],
+                float(scenario_match.group(2)),
+                rel_tol=1e-8,
+            ):
+                continue
+            # exclude any below frequency threshold
+            if (
+                "freqThreshold" in self.parameters
+                and frequencies[mode_number][0] < self.parameters["freqThreshold"]
+            ):
+                continue
+            # enxclude any below mass threshold
+            if (
+                "massThreshold" in self.parameters
+                and frequencies[mode_number][1] < self.parameters["massThreshold"]
+            ):
+                continue
+            # process data
+            x_pos, y_pos, z_pos = [], [], []
+            x_val, y_val, z_val = [], [], []
+            for line in segment["values"]:
+                x_pos.append(line[1])
+                y_pos.append(line[2])
+                z_pos.append(line[3])
+                x_val.append(line[4])
+                y_val.append(line[5])
+                z_val.append(line[6])
+            # create feature
+            self.timestamps.append(results[1])
+            self.features.append(
+                create_eigen_mode_feature(
+                    f"mode {mode_number}",
+                    "acceleration",
+                    frequencies[mode_number][0],
+                    x_pos,
+                    y_pos,
+                    z_pos,
+                    x_val,
+                    y_val,
+                    z_val,
+                )
+            )
 
-    return modeshapes
+    def write(self, features_directory: str) -> int:
+        """write features to directory
 
+        Args:
+            features_directory (str): directiory path
 
-def mode_to_schema(modeshapes, save_csv=False, save_mongo=True):
-    """ """
-    params_path = os.path.join(os.getcwd(), "instance", "fe_run_params.json")
-    if not os.path.exists(params_path):
-        raise FileNotFoundError()
+        Returns:
+            int: number of files written
+        """
+        # ensure directory
+        if not os.path.exists(features_directory):
+            os.mkdir(features_directory)
 
-    with open(params_path) as f:
-        fe_params = json.load(f)
+        # create feature groups
+        feature_groups = {}
+        manual_groupings = self.parameters["featureGroups"]
+        if len(manual_groupings) > 0 and len(manual_groupings) % 2 == 0:
+            for i in range(0, int(len(manual_groupings) / 2)):
+                feature_groups[manual_groupings[i * 2]] = manual_groupings[(i * 2) + 1]
+        else:
+            for feature in self.features:
+                key = feature["name"].lower().replace(" ", "-")
+                if key not in feature_groups:
+                    feature_groups[key] = f"^{key}$"
 
-    type_root = "eigen-mode"
-    type_header = {"name": modeshapes["metadata"]["data_type"]}
+        # output features into directories
+        for group in feature_groups:
+            group_dir = os.path.join(features_directory, group.lower().replace(" ", ""))
+            if not os.path.exists(group_dir):
+                os.mkdir(group_dir)
+            group_re = re.compile(feature_groups[group])
+            group_feature_keys = {}
+            for index, feature in enumerate(self.features):
+                key = feature["name"].lower().replace(" ", "-")
+                if not group_re.fullmatch(key):
+                    continue
+                if key not in group_feature_keys:
+                    group_feature_keys[key] = [index]
+                else:
+                    group_feature_keys[key].append(index)
+            for key in group_feature_keys:
+                document = create_schema_document(
+                    self.model_name,
+                    self.population_name,
+                    self.health_state,
+                    self.timestamps[group_feature_keys[key][0]],
+                    self.parameters,
+                )
+                for index in group_feature_keys[key]:
+                    document["features"].append(self.features[index])
+                with open(
+                    os.path.join(group_dir, f"{self.model_name}-{key}.json"), "w"
+                ) as fs:
+                    json.dump(document, fs)
 
-    for key, value in modeshapes.items():
-        if key == "metadata":
-            continue
-        variant_id = "acceleration"
-        scenario_id = "3"
-        feature_name = f"{type_root}-whole-structure-modeshape-{key[1]}"
-        environment = {
-            "naturalFrequency": {
-                "description": f"Mode shape {key[1]} of the structure, natural frequency in Hz",
-                "value": float(key[2]),
-            }
-        }
-
-        parts = modeshapes["metadata"]["structure_name"].split("-")
-        parts.insert(-1, scenario_id)
-        structure_name_filename = "-".join(parts)
-
-        # Handle the features section
-        transposed = list(zip(*value))
-        features = {
-            "name": feature_name,
-            "type": type_header,
-            "variant": variant_id,
-            "naturalFrequency": {"unit": "Hz", "value": float(key[2])},
-            "modeShape": {
-                "coordinates": {
-                    "global": {
-                        "translational": {
-                            axis: {
-                                "indices": {"start": 0, "end": len(coord_row) - 1},
-                                "vector": list(coord_row[1:]),
-                            }
-                            for coord_row, axis in zip(transposed[:3], ("x", "y", "z"))
-                        }
-                    }
-                },
-                "values": {
-                    axis: {
-                        "indices": {"start": 0, "end": len(value_row) - 1},
-                        "vector": [
-                            {"real": float(i), "imaginary": 0} for i in value_row[1:]
-                        ],
-                    }
-                    for value_row, axis in zip(transposed[3:], ("x", "y", "z"))
-                },
-            },
-        }
-        features["modeShape"]["coordinates"]["global"]["translational"]["unit"] = "m"
-        features["modeShape"]["values"]["unit"] = modeshapes["metadata"]["units"][key][
-            -1
-        ]
-
-        # Create the output JSON
-        json_file = {
-            "version": "1.3.1",
-            "name": structure_name_filename,
-            "population": "pear-bridge-beam-and-slab-1",
-            "source": {
-                "timestamp": modeshapes["metadata"]["timestamps"],
-                "selection": [{"name": modeshapes["metadata"]["structure_name"]}],
-                "software": [
-                    {
-                        "name": "IE2FE",
-                        "version": "0.1",
-                        "source": "https://github.com/TristanGowdridge/IE2FE",
-                        "parameters": fe_params,
-                    }
-                ],
-                "environment": environment,
-            },
-            "features": [features],
-        }
-
-        if save_csv:
-            save_name = structure_name_filename + "-" + feature_name + ".json"
-            save_folder = os.path.join(os.getcwd(), "parsed_feature_data")
-            if not os.path.isdir(save_folder):
-                os.mkdir(save_folder)
-            save_path = os.path.join(save_folder, save_name)
-            with open(save_path, "w") as f:
-                json.dump(json_file, f, indent=4)
-
-        if save_mongo:
-            collection_obj = db_get_collection()
-            collection_obj.insert_one(json_file)
-
-
-if __name__ == "__main__":
-    t0 = time.time()
-    fe_outputs_folder = (
-        r"C:\Users\trist\Desktop\University of Sheffield\ROSEHIPS\IE2FE\fe_outputs"
-    )
-    filename = "1-1-1_modeshapes.txt"
-    modeshapes = parse_eigenmode(fe_outputs_folder, filename)
-    mode_to_schema(modeshapes, save_csv=True, save_mongo=False)
-    print(f"Time to execute: {time.time() - t0:.2f}s")
+        return len(feature_groups.items())
