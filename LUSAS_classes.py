@@ -43,6 +43,7 @@ import geometry.beam as bf
 import geometry.plate as pf
 import geometry.translateAndScale as tasf
 from model.ie_to_fe import order_coords, greedy_cyclic_sort
+from model.parse_fe_data import FeatureWriter
 from model.preprocess_ie import extract_profile_info, extract_ie_information
 
 
@@ -175,6 +176,9 @@ class LUSASSession(ABC):
         "surfaceMeshSpacing": [0, 0],
         "volumeMeshSpacing": [2, 2, 2],
         "nModalFeatures": 10,
+        "freqThreshold": 0.1,
+        "massThreshold": 0.01,
+        "featureGroups": [],
         "loadcaseFormat": r"^{structure_label}-{subclass_id}-{population_id}-{structure_id}\.lvb$",
         "saveDisplacement": True,
         "saveReaction": True,
@@ -747,16 +751,23 @@ class LUSASSession(ABC):
             )
             return
         # Save data
+        feature_writer = FeatureWriter(self.model_name, self.model_population, 0, LUSASSession.FE_PARAMETERS)
         if LUSASSession.FE_PARAMETERS["saveModal"]:
             LUSASSession.print_diagnostics("Saving modal analysis")
             self.setup_modal_analysis()
             self.save_modal_data()
+            feature_writer.add_eigen_mode(
+                join(LUSASSession.FEATURES_FOLDER, "frequencies", f"{self.model_name}.txt"),
+                join(LUSASSession.FEATURES_FOLDER, "modal_shapes", f"{self.model_name}.txt")
+            )
         if LUSASSession.FE_PARAMETERS["saveDisplacement"]:
             LUSASSession.print_diagnostics("Saving displacement")
             self.save_displacement_data()
+            feature_writer.add_displacement(join(LUSASSession.FEATURES_FOLDER, "displacements", f"{self.model_name}.txt"))
         if LUSASSession.FE_PARAMETERS["saveReaction"]:
             LUSASSession.print_diagnostics("Saving reaction")
             self.save_reaction_data()
+            feature_writer.add_reaction(join(LUSASSession.FEATURES_FOLDER, "reactions", f"{self.model_name}.txt"))
         if LUSASSession.FE_PARAMETERS["saveForceMomentBeam"]:
             LUSASSession.print_diagnostics("Saving force moment beam")
             self.save_force_moment_beam_data()
@@ -766,6 +777,7 @@ class LUSASSession(ABC):
         if LUSASSession.FE_PARAMETERS["saveLoading"]:
             LUSASSession.print_diagnostics("Saving loading")
             self.save_loading_data()
+        feature_writer.write(LUSASSession.FEATURES_FOLDER)
         LUSASSession.print_diagnostics("Saving results complete")
 
     def common_save_params(
