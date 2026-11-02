@@ -923,7 +923,17 @@ class LUSASSession(ABC):
         attr = self.database.createPrintResultsWizard("Frequencies")
         attr.setResultsEntity("Loading")
         attr.setComponents(["FX", "FY", "FZ", "MX", "MY", "MZ", "RSLT"])
-        self.common_save_params(attr, "Eigenvalues", ["Eigenvalues"], "All")
+        self.common_save_params(
+            attr,
+            "Eigenvalues",
+            [
+                "Eigenvalues",
+                "Participation factors",
+                "Mass participation factors",
+                "Sum mass participation factors",
+            ],
+            "All",
+        )
         self.create_save_folder_and_save("frequencies")
 
         # Handle Mode Shapes
