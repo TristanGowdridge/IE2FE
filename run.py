@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import subprocess
+import time
 
 import click
 from tqdm import tqdm
@@ -80,6 +82,7 @@ flag_false = dict(required=False, is_flag=True, flag_value=False)
 )
 @click.option("--verbose", required=False, is_flag=True)
 @click.option("--limit", required=False, type=int, default=0)
+@click.option("--dispatch-clear", required=False, type=int, default=10)
 @click.option("--vertical-direction", required=False, type=str)
 @click.option("--analysis-category", required=False, type=str)
 @click.option("--model-units", required=False, multiple=True, type=str)
@@ -115,6 +118,7 @@ def run(
     parameters_file: str,
     verbose: bool,
     limit: int,
+    dispatch_clear: int,
     **options,
 ) -> None:
 
@@ -169,11 +173,23 @@ def run(
     LUSASSession.VERBOSE = verbose
     LUSASSession.LOGGER = staticmethod(tqdm.write)
     LUSASSession.set_fe_parameters(parameters)
+    dispatch_count = 0
     for model in tqdm(ie_models, desc="IE Models"):
+        # Create lusas Session
         session = LUSASSession.from_ie_model(model)
         session.assign_loadcase()
         session.save_results()
         session.save_model()
+        # Kill off any lusas modelleres still running
+        dispatch_count += 1
+        if dispatch_count % dispatch_clear == 0:
+            print(f"Killing LUSAS Modeller at dispatch count: {dispatch_count}")
+            taskkill = subprocess.run(
+                ["taskkill.exe", "/f", "/t", "/im", "lusas_m.exe"]
+            )
+            if taskkill.returncode != 0:
+                print(f"LUSAS termination error: {taskkill.returncode}")
+            time.sleep(5)
 
 
 if __name__ == "__main__":
