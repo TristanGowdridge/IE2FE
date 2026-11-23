@@ -827,7 +827,7 @@ class LUSASSession(ABC):
             os.mkdir(save_folder)
 
         self.modeller.getGridWindowByID(1).saveAllAs(
-            join(save_folder, f"{self.model_name}.txt"), "Text"
+            join(save_folder, f"{self.model_name}_{folder_name.lower()}.txt"), "Text"
         )
         self.modeller.getGridWindowByID(1).close()
 
