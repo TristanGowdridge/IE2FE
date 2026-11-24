@@ -77,6 +77,8 @@ def create_spatial_feature(
     x_val: list[float],
     y_val: list[float],
     z_val: list[float],
+    coordinate_unit: str = "m",
+    value_unit: str = "other",
 ) -> dict:
     """Create spatial feature
 
@@ -109,7 +111,7 @@ def create_spatial_feature(
         "coordinates": {
             "global": {
                 "translational": {
-                    "unit": "m",
+                    "unit": coordinate_unit,
                     "x": {"indices": {"start": 0, "end": len(x_pos)}, "vector": x_pos},
                     "y": {"indices": {"start": 0, "end": len(y_pos)}, "vector": y_pos},
                     "z": {"indices": {"start": 0, "end": len(z_pos)}, "vector": z_pos},
@@ -117,7 +119,7 @@ def create_spatial_feature(
             }
         },
         "values": {
-            "unit": "m",
+            "unit": value_unit,
             "x": {"indices": {"start": 0, "end": len(x_val)}, "vector": x_val},
             "y": {"indices": {"start": 0, "end": len(y_val)}, "vector": y_val},
             "z": {"indices": {"start": 0, "end": len(z_val)}, "vector": z_val},
@@ -368,6 +370,8 @@ class FeatureWriter:
                     x_val,
                     y_val,
                     z_val,
+                    coordinate_unit="m",
+                    value_unit="m",
                 )
             )
 
@@ -413,6 +417,8 @@ class FeatureWriter:
                     x_val,
                     y_val,
                     z_val,
+                    coordinate_unit="m",
+                    value_unit="kN",
                 )
             )
 
