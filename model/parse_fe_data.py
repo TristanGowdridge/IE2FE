@@ -393,7 +393,7 @@ class FeatureWriter:
             x_val, y_val, z_val = [], [], []
             for line in segment["values"]:
                 # ignore total line
-                if line[0] == isinstance(line[0], str) and line[0].lower() == "total":
+                if isinstance(line[0], str) and line[0].lower() == "total":
                     continue
                 # append data
                 x_pos.append(line[1])
