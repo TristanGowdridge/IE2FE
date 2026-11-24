@@ -758,7 +758,7 @@ class LUSASSession(ABC):
 
         # Save data
         def results_path(type: str) -> str:
-            return join(LUSASSession.RESULTS_FOLDER, type, f"{self.model_name}.txt")
+            return join(LUSASSession.RESULTS_FOLDER, type, f"{self.model_name}_{type.lower()}.txt")
 
         feature_writer = FeatureWriter(
             self.model_name, self.model_population, 0, LUSASSession.FE_PARAMETERS
