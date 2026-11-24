@@ -285,6 +285,19 @@ def process_results(
         if len(sections) > 0:
             sections[-1]["end"] = index
 
+    # check section size
+    for section in sections:
+        header_length = len(section["headers"])
+        value_counter = 0
+        for value in section["values"]:
+            value_length = len(value)
+            if header_length != value_length:
+                warnings.warn(
+                    f"Line {value_counter}: Value length mismatch, "
+                    f"header length {header_length}, value length {value_length}"
+                )
+            value_counter += 1
+
     # convert date time object
     timestamp = 0
     if len(header_values[1]) == 3 and len(header_values[2]) == 2:
