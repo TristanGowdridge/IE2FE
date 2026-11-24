@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import re
@@ -80,6 +81,20 @@ flag_false = dict(required=False, is_flag=True, flag_value=False)
         resolve_path=True,
     ),
 )
+@click.option(
+    "-log",
+    "--log-file",
+    required=False,
+    type=click.Path(
+        exists=False,
+        readable=False,
+        writable=True,
+        file_okay=True,
+        dir_okay=False,
+        resolve_path=True,
+    ),
+    default=None
+)
 @click.option("--verbose", required=False, is_flag=True)
 @click.option("--limit", required=False, type=int, default=0)
 @click.option("--dispatch-clear", required=False, type=int, default=10)
@@ -116,18 +131,31 @@ def run(
     result_directory: str,
     feature_directory: str,
     parameters_file: str,
+    log_file: str,
     verbose: bool,
     limit: int,
     dispatch_clear: int,
     **options,
 ) -> None:
 
+    # determine log settings
+    if log_file:
+        diagnostic_file = open(log_file, "a")
+        LUSASSession.LOGGER = staticmethod(
+            lambda message: print(
+                f"{datetime.datetime.now():%d/%m/%Y %H:%M:%S}: {message}",
+                file=diagnostic_file,
+                flush=True,
+            )
+        )
+
     # print folder settings
     if verbose:
-        print(
+        LUSASSession.LOGGER(
             "Folder locations:"
-            f"\n  IE: {ie_directory}\n  FE: {fe_directory}"
-            f"\n  Loadcase: {loadcase_directory}\n Results: {result_directory}\n Features: {feature_directory}"
+            f"\n\tIE: {ie_directory}\n\tFE: {fe_directory}"
+            f"\n\tLoadcase: {loadcase_directory}\n\tResults: {result_directory}"
+            f"\n\tFeatures: {feature_directory}"
         )
 
     # find all IE models to process
@@ -141,7 +169,7 @@ def run(
 
     # output number of model diagnostics
     if verbose:
-        print(f"Found {len(ie_models)} potential IE models to process")
+        LUSASSession.LOGGER(f"Found {len(ie_models)} potential IE models to process")
 
     # load parameters from JSON file
     parameters = {}
@@ -160,9 +188,9 @@ def run(
 
     # output loaded parameters diagnostics
     if verbose:
-        print("FE Parameters:")
+        LUSASSession.LOGGER("FE Parameters:")
         for name, value in parameters.items():
-            print(f"  {name}: {value}")
+            LUSASSession.LOGGER(f"\t{name}: {value}")
 
     # process ie models
     LUSASSession.IE_FOLDER = ie_directory
@@ -183,12 +211,14 @@ def run(
         # Kill off any lusas modelleres still running
         dispatch_count += 1
         if dispatch_count % dispatch_clear == 0:
-            print(f"Killing LUSAS Modeller at dispatch count: {dispatch_count}")
+            LUSASSession.LOGGER(
+                f"Killing LUSAS Modeller at dispatch count: {dispatch_count}"
+            )
             taskkill = subprocess.run(
                 ["taskkill.exe", "/f", "/t", "/im", "lusas_m.exe"]
             )
             if taskkill.returncode != 0:
-                print(f"LUSAS termination error: {taskkill.returncode}")
+                LUSASSession.LOGGER(f"LUSAS termination error: {taskkill.returncode}")
             time.sleep(5)
 
 
