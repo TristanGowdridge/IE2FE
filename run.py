@@ -204,10 +204,15 @@ def run(
     dispatch_count = 0
     for model in tqdm(ie_models, desc="IE Models"):
         # Create lusas Session
-        session = LUSASSession.from_ie_model(model)
-        session.assign_loadcase()
-        session.save_results()
-        session.save_model()
+        try:
+            session = LUSASSession.from_ie_model(model)
+            session.assign_loadcase()
+            session.save_results()
+            session.save_model()
+        except Exception as ex:
+            LUSASSession.LOGGER(
+                f"FAILED: {model}\nException: {ex}"
+            )
         # Kill off any lusas modelleres still running
         dispatch_count += 1
         if dispatch_count % dispatch_clear == 0:
