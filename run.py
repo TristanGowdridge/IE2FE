@@ -148,6 +148,8 @@ def run(
                 flush=True,
             )
         )
+    else:
+        LUSASSession.LOGGER = staticmethod(tqdm.write)
 
     # print folder settings
     if verbose:
@@ -199,7 +201,6 @@ def run(
     LUSASSession.RESULTS_FOLDER = result_directory
     LUSASSession.FEATURES_FOLDER = feature_directory
     LUSASSession.VERBOSE = verbose
-    LUSASSession.LOGGER = staticmethod(tqdm.write)
     LUSASSession.set_fe_parameters(parameters)
     dispatch_count = 0
     for model in tqdm(ie_models, desc="IE Models"):
